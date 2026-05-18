@@ -1,7 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router, get_session_pool
+from loguru import logger
+import os
+import sys
 import uvicorn
+
+# 日志配置：默认 INFO，可通过 QODER_DEBUG=true 开启 DEBUG
+logger.remove()
+_debug = os.environ.get("QODER_DEBUG", "").lower() in ("1", "true", "yes")
+_log_level = "DEBUG" if _debug else "INFO"
+logger.add(sys.stderr, level=_log_level, format="{time:HH:mm:ss.SSS} | {level:<7} | {message}")
 
 app = FastAPI(
     title="Biblebot Knowledge Server",

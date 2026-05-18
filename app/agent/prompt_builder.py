@@ -22,9 +22,9 @@ PATCHES_FILE = OVERRIDE_DIR / "patches.yaml"
 
 # 内置注入的 RAG 工具说明
 RAG_TOOL_INJECTION = """
-可用工具：
-- bash scripts/rag_search.sh "查询词"   语义搜索知识库，返回候选文档路径+摘要（仅定位用）
-- Bash (cat/grep/rg/head/tail/find/tree) 阅读和探索实际文件内容
+可用工具（注意工具名大小写）：
+- Bash: scripts/rag_search.sh "查询词"   语义搜索知识库，返回候选文档路径+摘要
+- Bash: cat/grep/rg/head/tail/find/tree 阅读和探索实际文件内容
 
 data/raw/     原始文档（pdf/docx等），不要直接读
 data/canonical_md/  已转换的Markdown文件，优先读这里

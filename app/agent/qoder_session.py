@@ -38,7 +38,7 @@ class QoderSession:
         session_id: str,
         system_prompt: str = "",
         knowledge_base: str = "data/canonical_md",
-        permission_mode: str = "auto",
+        permission_mode: str = "bypass_permissions",
     ):
         self.session_id = session_id
         self.system_prompt = system_prompt
@@ -109,6 +109,9 @@ class QoderSession:
                 continue
 
             obj_type = obj.get("type", "")
+            # 原始消息 dump（debug 用）
+            logger.debug(f"[QODER_RAW] type={obj_type} keys={list(obj.keys())} "
+                        f"preview={json.dumps(obj, ensure_ascii=False)[:300]}")
 
             if obj_type == "assistant":
                 # 助手文本
