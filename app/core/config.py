@@ -49,10 +49,6 @@ class Settings(BaseSettings):
     # 线程池配置
     THREAD_POOL_MAX_WORKERS: int = 32
 
-    # 网络搜索 API 配置
-    TAVILY_API_KEY: Optional[str] = None
-    SERPER_API_KEY: Optional[str] = None
-
     # Pydantic 配置
     model_config = SettingsConfigDict(
         env_file=".env", 

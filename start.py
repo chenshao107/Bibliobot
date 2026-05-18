@@ -2,12 +2,11 @@
 """
 Biblebot 启动脚本
 
-Agent Runtime 默认使用 Qoder CLI（对 DeepSeek 等模型支持更好），支持 Claude CLI 备选。
+Agent Runtime: Qoder CLI
 
 用法:
     python start.py              # 默认启动 Qoder CLI Agent
     python start.py --server     # 仅启动 RAG 后端服务
-    python start.py --claude     # 使用 Claude CLI 作为 Agent
     python start.py --debug      # 详细日志模式
 """
 
@@ -70,9 +69,9 @@ def start_rag_server(debug=False):
 VENV_PYTHON = ".venv/bin/python"
 
 SYSTEM_PROMPT = (
-    "You are an enterprise knowledge exploration agent. "
+    "You are Biblebot, an enterprise knowledge exploration agent. "
     "You have access to a knowledge base at data/canonical_md (Markdown files). "
-    f"Use '{VENV_PYTHON} scripts/rag_search.py \"query\"' to semantically search the knowledge base for candidate documents. "
+    "Use 'Bash: scripts/rag_search.sh \"query\"' to semantically search the knowledge base for candidate documents. "
     "RAG search returns file paths and snippets — it only LOCATES documents, it does NOT give you the full answer. "
     "After locating candidate documents, use Bash (cat, grep, head, tail, rg, find, tree) to READ and EXPLORE the actual files. "
     "Workflow: rag_search → locate → bash explore → refine → answer. "
@@ -97,7 +96,7 @@ def start_qoder_cli():
 
     print(f"\n{GREEN}Starting Qoder CLI Agent with Biblebot...{RESET}")
     print(f"{GREEN}  Knowledge Base: {knowledge_path}{RESET}")
-    print(f"{GREEN}  RAG Tool: python scripts/rag_search.py 'query'{RESET}\n")
+    print(f"{GREEN}  RAG Tool: scripts/rag_search.sh 'query'{RESET}\n")
 
     cmd = [
         "qodercli",
@@ -115,34 +114,9 @@ def start_qoder_cli():
         sys.exit(1)
 
 
-def start_claude_cli():
-    """启动 Claude CLI Agent（备选）"""
-    knowledge_path = _check_knowledge_base()
-
-    print(f"\n{GREEN}Starting Claude CLI Agent with Biblebot...{RESET}")
-    print(f"{GREEN}  Knowledge Base: {knowledge_path}{RESET}")
-    print(f"{GREEN}  RAG Tool: python scripts/rag_search.py 'query'{RESET}\n")
-
-    cmd = [
-        "claude",
-        "--add-dir", str(knowledge_path),
-        "--append-system-prompt", SYSTEM_PROMPT,
-    ]
-
-    try:
-        subprocess.run(cmd)
-    except KeyboardInterrupt:
-        print(f"\n{YELLOW}Claude CLI stopped{RESET}")
-    except FileNotFoundError:
-        print(f"{RED}Claude CLI 未安装或不在 PATH 中{RESET}")
-        print(f"{YELLOW}请安装: npm install -g @anthropic-ai/claude-code{RESET}")
-        sys.exit(1)
-
-
 def main():
-    parser = argparse.ArgumentParser(description="Biblebot 启动脚本 (Qoder CLI / Claude CLI 适配)")
+    parser = argparse.ArgumentParser(description="Biblebot 启动脚本 (Qoder CLI)")
     parser.add_argument("--server", action="store_true", help="仅启动 RAG 后端服务（不启动 Agent）")
-    parser.add_argument("--claude", action="store_true", help="使用 Claude CLI 作为 Agent（默认使用 Qoder CLI）")
     parser.add_argument("--debug", action="store_true", help="详细日志模式")
     args = parser.parse_args()
 
@@ -153,8 +127,6 @@ def main():
 
     if args.server:
         start_rag_server(debug=args.debug)
-    elif args.claude:
-        start_claude_cli()
     else:
         start_qoder_cli()
 

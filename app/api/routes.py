@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import List, Dict, Any, Optional, Union
 from loguru import logger
 from app.services.rag.retriever import RAGEngine
@@ -55,13 +55,6 @@ class ChatCompletionResponse(BaseModel):
     model: str
     choices: List[ChatCompletionChoice]
     usage: ChatCompletionUsage
-
-class ChatCompletionChunk(BaseModel):
-    id: str
-    object: str = "chat.completion.chunk"
-    created: int
-    model: str
-    choices: List[Dict[str, Any]]
 
 class ModelInfo(BaseModel):
     id: str
