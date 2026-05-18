@@ -12,3 +12,4 @@ requests
 loguru
 tqdm
 httpx[socks]
+pyyaml

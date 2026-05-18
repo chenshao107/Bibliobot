@@ -1,8 +1,20 @@
 import requests
-from flashrank import Ranker, RerankRequest
 from typing import List, Dict, Any
 from loguru import logger
 from app.core.config import settings
+
+# FlashRank 懒加载（仅本地模式需要，服务器用 API 模式无需安装）
+_rank_model = None
+
+
+def _get_ranker_and_types():
+    global _rank_model
+    if _rank_model is None:
+        from flashrank import Ranker, RerankRequest
+        _rank_model = Ranker(model_name=settings.RERANK_MODEL_NAME, cache_dir="./models")
+        return _rank_model, RerankRequest
+    from flashrank import RerankRequest
+    return _rank_model, RerankRequest
 
 class HybridReranker:
     """
@@ -17,10 +29,12 @@ class HybridReranker:
         
         if self.use_api:
             logger.info(f"Using Cloud API for Rerank: {settings.RERANK_API_URL}")
+            self.ranker = None
+            self._RerankRequest = None
         else:
             logger.info(f"Loading local Reranker model: {settings.RERANK_MODEL_NAME}")
             # FlashRank will download the model automatically
-            self.ranker = Ranker(model_name=settings.RERANK_MODEL_NAME, cache_dir="./models")
+            self.ranker, self._RerankRequest = _get_ranker_and_types()
 
     def rerank(self, query: str, passages: List[Dict[str, Any]], top_k: int = 5) -> List[Dict[str, Any]]:
         """
@@ -48,7 +62,7 @@ class HybridReranker:
             for i, p in enumerate(passages)
         ]
 
-        rerank_request = RerankRequest(query=query, passages=flash_passages)
+        rerank_request = self._RerankRequest(query=query, passages=flash_passages)
         results = self.ranker.rerank(rerank_request)
 
         # FlashRank returns a list of results with scores, map back to Qdrant format

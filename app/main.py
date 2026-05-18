@@ -1,11 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.routes import router
+from app.api.routes import router, get_session_pool
 import uvicorn
 
 app = FastAPI(
     title="Biblebot Knowledge Server",
-    description="企业知识库 RAG 检索服务。Agent Runtime 支持 Qoder CLI / Claude CLI。",
+    description="企业知识库 RAG 检索 + OpenAI兼容 Agent API。",
     version="3.0.0"
 )
 
@@ -21,20 +21,31 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(router, prefix="/api")
 
+
+@app.on_event("startup")
+async def startup():
+    pool = get_session_pool()
+    await pool.start()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    pool = get_session_pool()
+    await pool.stop()
+
 @app.get("/")
 async def root():
     return {
         "message": "Biblebot Knowledge Server is running.",
         "version": "3.0.0",
         "architecture": "轻RAG + 强探索",
-        "agent_runtime": "Qoder CLI (default) / Claude CLI",
+        "agent_runtime": "Qoder CLI",
         "endpoints": {
             "rag": "/api/query - RAG 语义检索",
+            "openai_compat": "/v1/chat/completions - OpenAI 兼容 Agent API",
+            "models": "/v1/models - 模型列表",
             "docs": "/docs - API 文档",
         },
-        "cli_tools": {
-            "rag_search": "python scripts/rag_search.py '查询词'",
-        }
     }
 
 if __name__ == "__main__":

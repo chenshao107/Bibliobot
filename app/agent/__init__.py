@@ -1,4 +1,7 @@
 """
-Agent 模块（保留目录结构兼容性）
-Agent Runtime 已由 Claude CLI 接管，本模块不再包含自建 Agent 循环。
+Agent 模块 — Qoder CLI 会话管理与 OpenAI 兼容 API 桥接
 """
+
+from app.agent.qoder_session import QoderSession
+from app.agent.session_pool import SessionPool, make_session_key
+from app.agent.prompt_builder import build_system_prompt

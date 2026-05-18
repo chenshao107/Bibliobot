@@ -1,33 +1,41 @@
-# Biblebot - RAG 服务镜像（Claude CLI 适配版）
-# Agent Runtime 由 Claude CLI 提供，本服务仅负责 RAG 检索
+# Biblebot - Agent API 服务镜像（OpenAI 兼容 + RAG）
+# 仅包含运行时依赖，不含 torch/flashrank/docling 等数据预处理大包
 
 FROM python:3.10-slim-bookworm
 
+# 代理配置（可选构建参数，国内环境通过 docker-compose 传入）
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=${NO_PROXY}
+
 LABEL maintainer="Biblebot Team"
-LABEL description="Biblebot RAG Server — serves knowledge retrieval for Claude CLI Agent"
+LABEL description="Biblebot Agent API Server — OpenAI-compatible endpoint + RAG retrieval"
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 系统依赖
+# 系统依赖（curl 用于 healthcheck + qodercli 安装）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    gcc \
-    g++ \
-    libmagic1 \
     curl \
-    git \
+    ca-certificates \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 WORKDIR /app
 
-# 依赖安装
-# 国内默认用清华镜像加速，海外可通过 --build-arg PIP_INDEX=https://pypi.org/simple 覆盖
+# Qoder CLI 安装（容器内自带，用户无需预装）
+RUN curl -fsSL https://qoder.com/install | bash \
+    && ln -sf /root/.local/bin/qodercli /usr/local/bin/qodercli \
+    && qodercli --version
+
+# 依赖安装 — 使用轻量的 requirements-server.txt
 ARG PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
-COPY requirements.txt .
-RUN pip install --no-cache-dir -i ${PIP_INDEX} --trusted-host pypi.tuna.tsinghua.edu.cn -r requirements.txt
+COPY requirements-server.txt .
+RUN pip install --no-cache-dir -i ${PIP_INDEX} --trusted-host pypi.tuna.tsinghua.edu.cn -r requirements-server.txt
 
 # 应用代码
 COPY app/ ./app/

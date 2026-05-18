@@ -1,11 +1,77 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional, Union
 from loguru import logger
 from app.services.rag.retriever import RAGEngine
 from app.core.config import settings
+from app.agent.session_pool import SessionPool, make_session_key
+from app.agent.prompt_builder import build_system_prompt
+import json
+import time
 
 router = APIRouter()
+
+# 全局会话池
+_session_pool: Optional[SessionPool] = None
+
+def get_session_pool() -> SessionPool:
+    global _session_pool
+    if _session_pool is None:
+        _session_pool = SessionPool()
+    return _session_pool
+
+
+# ============== OpenAI 兼容模型定义 ==============
+
+class ChatMessage(BaseModel):
+    role: str
+    content: Union[str, List[Dict[str, Any]]]
+
+class ChatCompletionRequest(BaseModel):
+    model: str = "biblebot"
+    messages: List[ChatMessage]
+    stream: bool = False
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    # 可选：手动指定 session_id（覆盖消息指纹）
+    user: Optional[str] = None
+
+class ChatCompletionChoice(BaseModel):
+    index: int = 0
+    message: ChatMessage
+    finish_reason: Optional[str] = "stop"
+
+class ChatCompletionUsage(BaseModel):
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+class ChatCompletionResponse(BaseModel):
+    id: str
+    object: str = "chat.completion"
+    created: int
+    model: str
+    choices: List[ChatCompletionChoice]
+    usage: ChatCompletionUsage
+
+class ChatCompletionChunk(BaseModel):
+    id: str
+    object: str = "chat.completion.chunk"
+    created: int
+    model: str
+    choices: List[Dict[str, Any]]
+
+class ModelInfo(BaseModel):
+    id: str
+    object: str = "model"
+    created: int
+    owned_by: str = "biblebot"
+
+class ModelListResponse(BaseModel):
+    object: str = "list"
+    data: List[ModelInfo]
+
 
 # ============== RAG 检索接口 ==============
 
@@ -89,3 +155,140 @@ async def query_rag(request: QueryRequest):
 async def health_check():
     """健康检查"""
     return {"status": "ok", "version": "3.0.0"}
+
+
+# ============== OpenAI 兼容接口 ==============
+
+def _extract_last_user_message(messages: List[ChatMessage]) -> str:
+    """提取最后一条 user 消息的纯文本"""
+    for m in reversed(messages):
+        if m.role == "user":
+            if isinstance(m.content, str):
+                return m.content
+            elif isinstance(m.content, list):
+                parts = []
+                for block in m.content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        parts.append(block.get("text", ""))
+                return "".join(parts)
+    return ""
+
+
+def _messages_to_openai_format(messages: List[ChatMessage]) -> list:
+    """将 Pydantic ChatMessage 转为 dict 列表"""
+    return [{"role": m.role, "content": m.content} for m in messages]
+
+
+@router.post("/v1/chat/completions")
+async def chat_completions(request: ChatCompletionRequest):
+    """
+    OpenAI 兼容的 Chat Completions 端点。
+    由 Qoder CLI Agent 接管对话。
+    """
+    # 生成 session key
+    raw_messages = _messages_to_openai_format(request.messages)
+    session_key = request.user or make_session_key(raw_messages)
+
+    # 提取用户消息
+    user_message = _extract_last_user_message(request.messages)
+    if not user_message:
+        raise HTTPException(status_code=400, detail="No user message found")
+
+    # 获取 system prompt
+    system_prompt = build_system_prompt()
+
+    # 获取或创建 session
+    pool = get_session_pool()
+    session = await pool.get_or_create(session_key, system_prompt)
+
+    completion_id = f"chatcmpl-{session_key}"
+
+    if request.stream:
+        return StreamingResponse(
+            _stream_response(session, user_message, completion_id, request.model),
+            media_type="text/event-stream",
+        )
+    else:
+        content = await _collect_full_response(session, user_message)
+        return ChatCompletionResponse(
+            id=completion_id,
+            created=int(time.time()),
+            model=request.model,
+            choices=[
+                ChatCompletionChoice(
+                    message=ChatMessage(role="assistant", content=content),
+                    finish_reason="stop",
+                )
+            ],
+            usage=ChatCompletionUsage(),
+        )
+
+
+async def _stream_response(session, message: str, completion_id: str, model: str):
+    """SSE 流式响应生成器"""
+    created = int(time.time())
+    try:
+        async for text_chunk in session.send_message(message):
+            if not text_chunk:
+                continue
+            chunk = {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": text_chunk},
+                    "finish_reason": None,
+                }],
+            }
+            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+        # 发送结束标记
+        final = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "stop",
+            }],
+        }
+        yield f"data: {json.dumps(final, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    except Exception as e:
+        logger.error(f"Stream error for session {session.session_id}: {e}")
+        error_chunk = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": {"content": f"\n[Error: {e}]"},
+                "finish_reason": "error",
+            }],
+        }
+        yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+
+async def _collect_full_response(session, message: str) -> str:
+    """非流式：收集完整响应"""
+    parts = []
+    async for text_chunk in session.send_message(message):
+        parts.append(text_chunk)
+    return "".join(parts)
+
+
+@router.get("/v1/models")
+async def list_models():
+    """返回可用模型列表"""
+    return ModelListResponse(
+        data=[
+            ModelInfo(id="biblebot", created=int(time.time())),
+        ]
+    )

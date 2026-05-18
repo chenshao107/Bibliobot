@@ -1,0 +1,13 @@
+# Biblebot Server 运行时依赖（轻量，不含数据预处理大包）
+# 数据预处理的完整依赖见 requirements.txt
+
+fastapi
+uvicorn
+qdrant-client
+pydantic
+pydantic-settings
+python-dotenv
+httpx
+requests
+loguru
+pyyaml
