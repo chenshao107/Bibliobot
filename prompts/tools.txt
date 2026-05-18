@@ -1,3 +1,5 @@
-你有以下工具可用，并且可以一次调用多个工具：
+你可用的能力：
+- 阅读文件：bash (cat/head/tail/grep/rg)，查看 data/canonical_md/ 下的 Markdown 文档
+- 执行脚本：运行 python 或 bash 命令处理数据
 
 {{TOOLS_PLACEHOLDER}}

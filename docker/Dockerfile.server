@@ -40,6 +40,8 @@ RUN pip install --no-cache-dir -i ${PIP_INDEX} --trusted-host pypi.tuna.tsinghua
 # 应用代码
 COPY app/ ./app/
 COPY scripts/ ./scripts/
+COPY prompts/ ./prompts/
+COPY prompts_override/ ./prompts_override/
 
 # 目录
 RUN mkdir -p \
