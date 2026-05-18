@@ -6,6 +6,7 @@ from loguru import logger
 from app.services.rag.retriever import RAGEngine
 from app.core.config import settings
 from app.agent.session_pool import SessionPool, make_session_key
+from app.agent.qoder_session import StreamChunk
 from app.agent.prompt_builder import build_system_prompt
 import json
 import time
@@ -225,24 +226,44 @@ async def chat_completions(request: ChatCompletionRequest):
 
 
 async def _stream_response(session, message: str, completion_id: str, model: str):
-    """SSE 流式响应生成器"""
+    """SSE 流式响应生成器 — 含工具调用可见性"""
     created = int(time.time())
+
+    def _emit(content: str):
+        return {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": {"content": content},
+                "finish_reason": None,
+            }],
+        }
+
+    def _format_tool_chunk(sc: StreamChunk) -> str:
+        """将工具事件格式化为可见的 markdown 文本块"""
+        if sc.kind == "tool_call":
+            name = sc.tool_name or "?"
+            inp = sc.tool_input[:200] if sc.tool_input else ""
+            return f"\n\n🔧 **{name}**\n```\n{inp}\n```\n"
+        elif sc.kind == "tool_result":
+            out = sc.tool_output[:500] if sc.tool_output else "(empty)"
+            return f"\n📋 **输出**\n```\n{out}\n```\n"
+        elif sc.kind == "error":
+            return f"\n\n❌ **错误**: {sc.content}\n"
+        return ""
+
     try:
-        async for text_chunk in session.send_message(message):
-            if not text_chunk:
-                continue
-            chunk = {
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": text_chunk},
-                    "finish_reason": None,
-                }],
-            }
-            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        async for chunk in session.send_message(message):
+            if chunk.kind == "text":
+                if chunk.content:
+                    yield f"data: {json.dumps(_emit(chunk.content), ensure_ascii=False)}\n\n"
+            elif chunk.kind in ("tool_call", "tool_result", "error"):
+                formatted = _format_tool_chunk(chunk)
+                if formatted:
+                    yield f"data: {json.dumps(_emit(formatted), ensure_ascii=False)}\n\n"
 
         # 发送结束标记
         final = {
@@ -261,26 +282,25 @@ async def _stream_response(session, message: str, completion_id: str, model: str
 
     except Exception as e:
         logger.error(f"Stream error for session {session.session_id}: {e}")
-        error_chunk = {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": model,
-            "choices": [{
-                "index": 0,
-                "delta": {"content": f"\n[Error: {e}]"},
-                "finish_reason": "error",
-            }],
-        }
+        error_chunk = _emit(f"\n❌ [Error: {e}]")
+        error_chunk["choices"][0]["finish_reason"] = "error"
         yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
 
 async def _collect_full_response(session, message: str) -> str:
-    """非流式：收集完整响应"""
+    """非流式：收集完整响应（含工具调用）"""
     parts = []
-    async for text_chunk in session.send_message(message):
-        parts.append(text_chunk)
+    async for chunk in session.send_message(message):
+        if chunk.kind == "text":
+            parts.append(chunk.content)
+        elif chunk.kind == "tool_call":
+            parts.append(f"\n🔧 `{chunk.tool_name}` {chunk.tool_input[:100]}\n")
+        elif chunk.kind == "tool_result":
+            out = chunk.tool_output[:300] if chunk.tool_output else "(empty)"
+            parts.append(f"📋 {out}\n")
+        elif chunk.kind == "error":
+            parts.append(f"\n❌ {chunk.content}\n")
     return "".join(parts)
 
 

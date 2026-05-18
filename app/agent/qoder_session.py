@@ -12,11 +12,22 @@ import asyncio
 import json
 import os
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import AsyncIterator, Optional
 from loguru import logger
 
 QODERCLI_BIN = shutil.which("qodercli") or "qodercli"
+
+
+@dataclass
+class StreamChunk:
+    """qodercli 输出的一个流式块"""
+    kind: str          # "text" | "tool_call" | "tool_result" | "error"
+    content: str = ""
+    tool_name: str = ""
+    tool_input: str = ""
+    tool_output: str = ""
 
 
 class QoderSession:
@@ -35,8 +46,8 @@ class QoderSession:
         self.permission_mode = permission_mode
         self._is_new = True
 
-    async def send_message(self, message: str) -> AsyncIterator[str]:
-        """发送消息并返回 SSE 流式文本块"""
+    async def send_message(self, message: str) -> AsyncIterator[StreamChunk]:
+        """发送消息并返回流式块（含工具调用/结果）"""
         cmd = self._build_command(message)
         logger.info(f"Qoder session={self.session_id} is_new={self._is_new}")
 
@@ -77,9 +88,11 @@ class QoderSession:
         ]
         return cmd
 
-    async def _parse_stream(self, proc: asyncio.subprocess.Process) -> AsyncIterator[str]:
-        """解析 qodercli stream-json 输出，提取文本内容"""
+    async def _parse_stream(self, proc: asyncio.subprocess.Process) -> AsyncIterator[StreamChunk]:
+        """解析 qodercli stream-json 输出，提取所有有意义的事件"""
         buffer = b""
+        pending_tool = {"name": "", "input": ""}  # 累积 tool_use + tool_result 配对
+
         while True:
             try:
                 line = await asyncio.wait_for(proc.stdout.readline(), timeout=120)
@@ -96,26 +109,64 @@ class QoderSession:
                 continue
 
             obj_type = obj.get("type", "")
+
             if obj_type == "assistant":
-                # 提取 assistant 文本块
+                # 助手文本
                 message_obj = obj.get("message", {})
                 content = message_obj.get("content", [])
                 if isinstance(content, list):
                     for block in content:
                         if isinstance(block, dict) and block.get("type") == "text":
-                            yield block.get("text", "")
+                            yield StreamChunk(kind="text", content=block.get("text", ""))
+                        elif isinstance(block, dict) and block.get("type") == "tool_use":
+                            pending_tool["name"] = block.get("name", "")
+                            pending_tool["input"] = json.dumps(block.get("input", {}), ensure_ascii=False)
+                            yield StreamChunk(
+                                kind="tool_call",
+                                tool_name=pending_tool["name"],
+                                tool_input=pending_tool["input"],
+                            )
+                        elif isinstance(block, dict) and block.get("type") == "tool_result":
+                            output = block.get("content", "")
+                            if isinstance(output, list):
+                                output = "\n".join(
+                                    o.get("text", "") for o in output if isinstance(o, dict)
+                                )
+                            yield StreamChunk(
+                                kind="tool_result",
+                                tool_name=pending_tool["name"] or "?",
+                                tool_output=str(output),
+                            )
+                            pending_tool = {"name": "", "input": ""}
                 elif isinstance(content, str):
-                    yield content
-            elif obj_type == "result":
-                # 最终结果
-                break
+                    yield StreamChunk(kind="text", content=content)
+
             elif obj_type == "system":
-                # 系统消息（session ID 确认等）
-                pass
+                # 系统消息 — 尝试从中提取工具执行信息
+                message_obj = obj.get("message", {})
+                content = message_obj.get("content", [])
+                text = ""
+                if isinstance(content, list):
+                    text = "\n".join(
+                        block.get("text", "") for block in content
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    )
+                elif isinstance(content, str):
+                    text = content
+                if text.strip():
+                    # 如果看起来像工具输出（多行、包含命令特征），标记为 tool_result
+                    if _looks_like_tool_output(text):
+                        yield StreamChunk(kind="tool_result", tool_output=text)
+                    else:
+                        yield StreamChunk(kind="text", content=text)
+
+            elif obj_type == "result":
+                break
+
             elif obj_type == "error":
                 err_msg = obj.get("message", "unknown error")
                 logger.error(f"Qoder error: {err_msg}")
-                yield f"\n[Error: {err_msg}]"
+                yield StreamChunk(kind="error", content=str(err_msg))
 
     def fork(self) -> "QoderSession":
         """创建分叉会话（用于编辑/回滚场景）"""
@@ -129,3 +180,19 @@ class QoderSession:
         )
         new_session._is_new = True
         return new_session
+
+
+def _looks_like_tool_output(text: str) -> bool:
+    """判断 system 消息文本是否像是工具执行输出（而非对话文本）"""
+    # 多行输出通常是命令/脚本结果
+    lines = text.strip().split("\n")
+    if len(lines) >= 3:
+        return True
+    # 包含典型的技术输出特征
+    tech_markers = ["Permission", "Result", "Output", "Running", "Executing",
+                    "Error", "Warning", "INFO", "DEBUG", "Exit code",
+                    "total", "files", "directories"]
+    for marker in tech_markers:
+        if marker in text:
+            return True
+    return False

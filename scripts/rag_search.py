@@ -1,4 +1,4 @@
-#!/usr/bin/env -S .venv/bin/python3
+#!/usr/bin/env python3
 """
 rag_search - 企业知识库语义搜索 CLI 工具
 

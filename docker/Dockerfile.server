@@ -43,6 +43,10 @@ COPY scripts/ ./scripts/
 COPY prompts/ ./prompts/
 COPY prompts_override/ ./prompts_override/
 
+# 脚本全部可执行，并加入 PATH 方便 Agent 直接调用
+RUN chmod +x scripts/*.sh && chmod +x scripts/*.py
+ENV PATH="${PATH}:/app/scripts"
+
 # 目录
 RUN mkdir -p \
     /app/data/raw \
