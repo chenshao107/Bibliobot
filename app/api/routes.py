@@ -243,16 +243,12 @@ async def _stream_response(session, message: str, completion_id: str, model: str
         }
 
     def _format_tool_chunk(sc: StreamChunk) -> str:
-        """将工具事件格式化为可见的 markdown 文本块"""
+        """将工具调用格式化为可见的 markdown（仅 tool_call 推到前端）"""
         if sc.kind == "tool_call":
             name = sc.tool_name or "?"
             inp = sc.tool_input[:200] if sc.tool_input else ""
             return f"\n\n🔧 **{name}**\n```\n{inp}\n```\n"
-        elif sc.kind == "tool_result":
-            out = sc.tool_output[:500] if sc.tool_output else "(empty)"
-            return f"\n📋 **输出**\n```\n{out}\n```\n"
-        elif sc.kind == "error":
-            return f"\n\n❌ **错误**: {sc.content}\n"
+        # tool_result / error 只记日志，不推前端
         return ""
 
     try:
@@ -260,10 +256,15 @@ async def _stream_response(session, message: str, completion_id: str, model: str
             if chunk.kind == "text":
                 if chunk.content:
                     yield f"data: {json.dumps(_emit(chunk.content), ensure_ascii=False)}\n\n"
-            elif chunk.kind in ("tool_call", "tool_result", "error"):
+            elif chunk.kind == "tool_call":
                 formatted = _format_tool_chunk(chunk)
                 if formatted:
                     yield f"data: {json.dumps(_emit(formatted), ensure_ascii=False)}\n\n"
+            elif chunk.kind == "tool_result":
+                logger.info(f"[TOOL_RESULT] session={session.session_id} "
+                            f"tool={chunk.tool_name} output={chunk.tool_output[:300]}")
+            elif chunk.kind == "error":
+                logger.error(f"[TOOL_ERROR] session={session.session_id} {chunk.content}")
 
         # 发送结束标记
         final = {
@@ -289,7 +290,7 @@ async def _stream_response(session, message: str, completion_id: str, model: str
 
 
 async def _collect_full_response(session, message: str) -> str:
-    """非流式：收集完整响应（含工具调用）"""
+    """非流式：收集完整响应（工具调用可见，结果仅日志）"""
     parts = []
     async for chunk in session.send_message(message):
         if chunk.kind == "text":
@@ -297,10 +298,10 @@ async def _collect_full_response(session, message: str) -> str:
         elif chunk.kind == "tool_call":
             parts.append(f"\n🔧 `{chunk.tool_name}` {chunk.tool_input[:100]}\n")
         elif chunk.kind == "tool_result":
-            out = chunk.tool_output[:300] if chunk.tool_output else "(empty)"
-            parts.append(f"📋 {out}\n")
+            logger.info(f"[TOOL_RESULT] session={session.session_id} "
+                        f"tool={chunk.tool_name} output={chunk.tool_output[:300]}")
         elif chunk.kind == "error":
-            parts.append(f"\n❌ {chunk.content}\n")
+            logger.error(f"[TOOL_ERROR] session={session.session_id} {chunk.content}")
     return "".join(parts)
 
 
