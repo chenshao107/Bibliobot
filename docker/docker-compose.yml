@@ -36,6 +36,8 @@ services:
         - HTTPS_PROXY=${HTTPS_PROXY:-}
         - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,qdrant}
     container_name: biblebot-server
+    # 容器文件系统只读（除显式 tmpfs/volume 外，Agent 无法修改任何代码/脚本/配置）
+    read_only: true
     ports:
       - "8000:8000"
     volumes:
@@ -46,16 +48,20 @@ services:
         target: /app/data/work
         tmpfs:
           size: 256M
+      # 通用临时目录（程序运行需要可写 /tmp）
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 64M
       # 配置文件
       - ../.env:/app/.env:ro
-      # Qoder session 持久化（宿主机保存对话历史）
+      # Qoder session 持久化（volume 在 read_only 容器中仍可写）
       - qoder-sessions:/root/.qoder
     env_file:
       - ../.env
     environment:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
-      # QODER_PERSONAL_ACCESS_TOKEN 从 .env 通过 env_file 注入
     depends_on:
       qdrant:
         condition: service_healthy
