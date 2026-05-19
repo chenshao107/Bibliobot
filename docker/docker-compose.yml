@@ -31,31 +31,23 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.server
       args:
-        # 代理配置（可选，国内环境可能需要）
         - HTTP_PROXY=${HTTP_PROXY:-}
         - HTTPS_PROXY=${HTTPS_PROXY:-}
         - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,qdrant}
     container_name: biblebot-server
-    # 容器文件系统只读（除显式 tmpfs/volume 外，Agent 无法修改任何代码/脚本/配置）
-    read_only: true
     ports:
       - "8000:8000"
     volumes:
-      # 整个 data 目录只读（Agent 不可修改知识库）
-      - ../data:/app/data:ro
-      # Agent 临时工作目录（tmpfs 内存盘，重启即消失）
+      # 整个工程目录只读（app 代码、scripts、prompts 等全部不可修改）
+      - ../:/app:ro
+      # Agent 临时工作目录（tmpfs 内存盘，覆盖只读的 /app/data/work）
       - type: tmpfs
         target: /app/data/work
         tmpfs:
           size: 256M
-      # 通用临时目录（程序运行需要可写 /tmp）
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          size: 64M
       # 配置文件
       - ../.env:/app/.env:ro
-      # Qoder session 持久化（volume 在 read_only 容器中仍可写）
+      # Qoder session 持久化（对话历史保存在宿主机）
       - qoder-sessions:/root/.qoder
     env_file:
       - ../.env

@@ -47,7 +47,7 @@ COPY prompts_override/ ./prompts_override/
 RUN chmod +x scripts/*.sh && chmod +x scripts/*.py
 ENV PATH="${PATH}:/app/scripts"
 
-# 目录（work 由 docker-compose tmpfs 提供，不在此创建）
+# 目录（运行时由 docker-compose 的 ro 挂载提供）
 RUN mkdir -p \
     /app/data/raw \
     /app/data/canonical_md
