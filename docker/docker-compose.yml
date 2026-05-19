@@ -39,12 +39,13 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # 知识库目录（只读）
-      - ../data/canonical_md:/app/data/canonical_md:ro
-      # 原始数据目录
-      - ../data/raw:/app/data/raw:ro
-      # 工作目录
-      - ../data/work:/app/data/work
+      # 整个 data 目录只读（Agent 不可修改知识库）
+      - ../data:/app/data:ro
+      # Agent 临时工作目录（tmpfs 内存盘，重启即消失）
+      - type: tmpfs
+        target: /app/data/work
+        tmpfs:
+          size: 256M
       # 配置文件
       - ../.env:/app/.env:ro
       # Qoder session 持久化（宿主机保存对话历史）
