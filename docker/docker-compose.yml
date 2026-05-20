@@ -18,7 +18,7 @@ services:
       - QDRANT__SERVICE__GRPC_PORT=6334
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/localhost/6333; printf 'GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; grep -qi ok <&3"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -57,6 +57,9 @@ services:
     depends_on:
       qdrant:
         condition: service_healthy
+    dns:
+      - 114.114.114.114
+      - 8.8.8.8
     restart: unless-stopped
     networks:
       - biblebot-net
