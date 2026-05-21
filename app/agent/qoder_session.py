@@ -49,7 +49,7 @@ class QoderSession:
     async def send_message(self, message: str) -> AsyncIterator[StreamChunk]:
         """发送消息并返回流式块（含工具调用/结果）"""
         cmd = self._build_command(message)
-        logger.info(f"Qoder session={self.session_id} is_new={self._is_new}")
+        logger.info(f"Qoder session={self.session_id} is_new={self._is_new} cmd=qodercli ...")
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -61,10 +61,10 @@ class QoderSession:
         try:
             async for chunk in self._parse_stream(proc):
                 yield chunk
-            await asyncio.wait_for(proc.wait(), timeout=10)
+            await asyncio.wait_for(proc.wait(), timeout=30)
             if proc.returncode != 0:
                 stderr = (await proc.stderr.read()).decode(errors="replace")
-                logger.warning(f"qodercli exit={proc.returncode}: {stderr[:200]}")
+                logger.error(f"qodercli exit={proc.returncode} session={self.session_id}: {stderr[:500]}")
         finally:
             if proc.returncode is None:
                 proc.kill()
@@ -72,7 +72,8 @@ class QoderSession:
         self._is_new = False
 
     def _build_command(self, message: str) -> list:
-        cmd = [QODERCLI_BIN, "-p", "--output-format", "stream-json"]
+        cmd = [QODERCLI_BIN, "-p", "--output-format", "stream-json",
+               "--max-output-tokens", "32k"]
 
         if self._is_new:
             cmd += ["--session-id", self.session_id]
@@ -95,7 +96,7 @@ class QoderSession:
 
         while True:
             try:
-                line = await asyncio.wait_for(proc.stdout.readline(), timeout=120)
+                line = await asyncio.wait_for(proc.stdout.readline(), timeout=300)
             except asyncio.TimeoutError:
                 logger.warning(f"Session {self.session_id} stdout timeout")
                 break

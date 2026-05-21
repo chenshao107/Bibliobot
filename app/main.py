@@ -4,13 +4,32 @@ from app.api.routes import router, get_session_pool
 from loguru import logger
 import os
 import sys
+from pathlib import Path
 import uvicorn
 
-# 日志配置：默认 INFO，可通过 QODER_DEBUG=true 开启 DEBUG
+# ── 日志配置 ──────────────────────────────────────────────
 logger.remove()
+
 _debug = os.environ.get("QODER_DEBUG", "").lower() in ("1", "true", "yes")
 _log_level = "DEBUG" if _debug else "INFO"
-logger.add(sys.stderr, level=_log_level, format="{time:HH:mm:ss.SSS} | {level:<7} | {message}")
+
+# console 日志（Docker 中通过 docker logs 可见）
+logger.add(sys.stderr, level=_log_level,
+           format="{time:HH:mm:ss.SSS} | {level:<7} | {message}")
+
+# 文件日志（持久化，按天轮转，保留 7 天）
+LOG_DIR = Path(__file__).parent.parent / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+logger.add(
+    LOG_DIR / "biblebot_{time:YYYY-MM-DD}.log",
+    level="DEBUG",  # 文件始终记 DEBUG，方便事后排查
+    rotation="00:00",
+    retention="7 days",
+    encoding="utf-8",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {name}:{function}:{line} | {message}"
+)
+logger.info(f"Log file: {LOG_DIR.resolve()}")
+# ──────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="Biblebot Knowledge Server",

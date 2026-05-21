@@ -55,3 +55,4 @@ prompts_override/*
 # 日志
 *.log
 .env
+.tmp/
