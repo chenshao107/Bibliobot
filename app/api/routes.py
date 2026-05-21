@@ -282,8 +282,10 @@ async def _stream_response(session, message: str, completion_id: str, model: str
         yield "data: [DONE]\n\n"
 
     except Exception as e:
-        logger.error(f"Stream error for session {session.session_id}: {e}")
-        error_chunk = _emit(f"\n❌ [Error: {e}]")
+        err_msg = str(e) or type(e).__name__
+        logger.error(f"Stream error for session {session.session_id}: {err_msg}")
+        logger.opt(exception=True).debug("Stream error traceback:")
+        error_chunk = _emit(f"\n❌ [Error: {err_msg}]\n")
         error_chunk["choices"][0]["finish_reason"] = "error"
         yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"

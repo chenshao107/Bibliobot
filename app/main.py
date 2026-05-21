@@ -18,8 +18,13 @@ logger.add(sys.stderr, level=_log_level,
            format="{time:HH:mm:ss.SSS} | {level:<7} | {message}")
 
 # 文件日志（持久化，按天轮转，保留 7 天）
+# Docker ro 回退：优先 /app/logs（volume 挂载），否则用 tmpfs
 LOG_DIR = Path(__file__).parent.parent / "logs"
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    LOG_DIR = Path(__file__).parent.parent / "data" / "work" / "logs"
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
 logger.add(
     LOG_DIR / "biblebot_{time:YYYY-MM-DD}.log",
     level="DEBUG",  # 文件始终记 DEBUG，方便事后排查

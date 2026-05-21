@@ -17,7 +17,30 @@ from pathlib import Path
 from typing import AsyncIterator, Optional
 from loguru import logger
 
-QODERCLI_BIN = shutil.which("qodercli") or "qodercli"
+def _find_qodercli() -> str:
+    """自动发现 qodercli 二进制，处理 Docker volume 挂载导致 symlink 过期的情况"""
+    # 1. 先尝试 PATH
+    found = shutil.which("qodercli")
+    if found and os.path.isfile(found):
+        return found
+    # 2. 搜索安装目录（Docker 中 /root/.qoder 被 volume 覆盖时 symlink 可能断链）
+    import glob
+    for base in ("/root/.qoder/bin/qodercli", os.path.expanduser("~/.qoder/bin/qodercli")):
+        versions = sorted(glob.glob(f"{base}/qodercli-*"), reverse=True)
+        for v in versions:
+            if os.path.isfile(v) and os.access(v, os.X_OK):
+                # 同时修复断链的 symlink
+                local_link = os.path.expanduser("~/.local/bin/qodercli")
+                try:
+                    if os.path.islink(local_link):
+                        os.unlink(local_link)
+                    os.symlink(v, local_link)
+                except OSError:
+                    pass
+                return v
+    return "qodercli"
+
+QODERCLI_BIN = _find_qodercli()
 
 
 @dataclass
@@ -49,7 +72,8 @@ class QoderSession:
     async def send_message(self, message: str) -> AsyncIterator[StreamChunk]:
         """发送消息并返回流式块（含工具调用/结果）"""
         cmd = self._build_command(message)
-        logger.info(f"Qoder session={self.session_id} is_new={self._is_new} cmd=qodercli ...")
+        cmd_log = self._format_cmd_for_log(cmd)
+        logger.info(f"Qoder session={self.session_id} is_new={self._is_new}\n[QODER_CMD] {cmd_log}")
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -70,6 +94,35 @@ class QoderSession:
                 proc.kill()
                 await proc.wait()
         self._is_new = False
+
+    def _format_cmd_for_log(self, cmd: list) -> str:
+        """将命令列表格式化为可复制粘贴的 shell 命令字符串，长参数截断。"""
+        parts = []
+        skip_next = False
+        for i, arg in enumerate(cmd):
+            if skip_next:
+                skip_next = False
+                continue
+            # system-prompt 参数太长，截断展示
+            if arg == "--system-prompt" and i + 1 < len(cmd):
+                sp = cmd[i + 1]
+                if len(sp) > 200:
+                    parts.append(f"--system-prompt '{sp[:200]}...({len(sp)} chars)'")
+                else:
+                    parts.append(f"--system-prompt '{sp}'")
+                skip_next = True
+                continue
+            # 用户消息太长也截断
+            if i == len(cmd) - 1 and len(arg) > 500:
+                parts.append(f"'{arg[:500]}...({len(arg)} chars)'")
+                continue
+            # 含空格或特殊字符的参数加引号
+            if any(c in arg for c in (' ', '"', "'", '$', '`', '\\', '(', ')', '&', '|', ';')):
+                escaped = arg.replace("'", "'\\''")
+                parts.append(f"'{escaped}'")
+            else:
+                parts.append(arg)
+        return " \\\n  ".join(parts)
 
     def _build_command(self, message: str) -> list:
         cmd = [QODERCLI_BIN, "-p", "--output-format", "stream-json",
