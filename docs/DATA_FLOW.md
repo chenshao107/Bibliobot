@@ -10,7 +10,7 @@ Open WebUI / 客户端
 │  routes.py: chat_completions()                       │
 │    1. 提取消息 → session_key (UUID v5)                │
 │    2. 组装 system_prompt                             │
-│    3. get_or_create QoderSession                     │
+│    3. get_or_create ClaudeSession                   │
 │    4. 流式/非流式返回                                 │
 └──────────┬───────────────────────────────────────────┘
            │
@@ -21,11 +21,11 @@ Open WebUI / 客户端
     └──────┬──────┘     └─────────────┘
            │ system_prompt (纯文本)
     ┌──────▼──────────────────────────────────────────┐
-    │  QoderSession                                     │
-    │    qodercli -p --session-id <uuid>                 │
+    │  ClaudeSession                                   │
+    │    claude -p --session-id <uuid>                   │
     │            --system-prompt "..."                   │
     │            --add-dir data/canonical_md             │
-    │            --permission-mode bypass_permissions    │
+    │            --permission-mode bypassPermissions    │
     │            "用户问题"                               │
     │            --output-format stream-json             │
     │                                                    │
@@ -146,8 +146,8 @@ async def get_or_create(session_key, system_prompt):
     if session_key in self._sessions:
         return existing_session  # 复用，刷新时间戳
     else:
-        # 新建 QoderSession，--session-id 模式
-        return QoderSession(session_key, system_prompt)
+        # 新建 ClaudeSession，--session-id 模式
+        return ClaudeSession(session_key, system_prompt)
 ```
 
 - 最多 50 个并发会话
@@ -156,38 +156,38 @@ async def get_or_create(session_key, system_prompt):
 
 ---
 
-## 第5步: Qoder CLI 子进程
+## 第5步: Claude CLI 子进程
 
 ### 新会话（首次）
 
 ```bash
-qodercli -p \
+claude -p \
   --output-format stream-json \
   --session-id 1357a4e9-6c95-5688-8e48-e22e0622d58d \
   --system-prompt "你是 Biblebot，一个企业级技术知识库智能助手..." \
   --add-dir /app/data/canonical_md \
-  --permission-mode bypass_permissions \
+  --permission-mode bypassPermissions \
   "140服务器怎么拉取代码？"
 ```
 
 ### 续接会话（同 UUID 的后续请求）
 
 ```bash
-qodercli -p \
+claude -p \
   --output-format stream-json \
   --resume 1357a4e9-6c95-5688-8e48-e22e0622d58d \
   --add-dir /app/data/canonical_md \
-  --permission-mode bypass_permissions \
+  --permission-mode bypassPermissions \
   "前面的那个run_repo_init_sync具体怎么用？"
 ```
 
-此时 Qoder 自动加载之前的对话历史，Agent 知道上下文。
+此时 Claude 自动加载之前的对话历史，Agent 知道上下文。
 
 ---
 
 ## 第6步: NDJSON 解析
 
-qodercli 输出格式为 **NDJSON** (每行一个 JSON):
+claude 输出格式为 **NDJSON** (每行一个 JSON):
 
 ```jsonl
 {"type":"system","subtype":"init","tools":["Agent","Bash","Glob","Grep","Read",...]}
@@ -199,7 +199,7 @@ qodercli 输出格式为 **NDJSON** (每行一个 JSON):
 
 ### NDJSON → StreamChunk 映射
 
-| Qoder type | content block type | → StreamChunk.kind | 前端行为 |
+| Claude type | content block type | → StreamChunk.kind | 前端行为 |
 |-----------|-------------------|---------------------|---------|
 | assistant | text | `text` | ✅ SSE delta content |
 | assistant | tool_use | `tool_call` | ✅ SSE `🔧 **Bash**` |
@@ -275,21 +275,21 @@ data: [DONE]
 第1轮: "140服务器怎么拉取代码？"
   → UUID v5 = 1357a4e9-...
   → _is_new = True
-  → qodercli --session-id 1357a4e9-... --system-prompt "..."
+  → claude --session-id 1357a4e9-... --system-prompt "..."
 
 第2轮: "前面的run_repo_init_sync怎么用？"
   → UUID v5 = 1357a4e9-... (相同!)
-  → SessionPool 命中 → 复用同一个 QoderSession
+  → SessionPool 命中 → 复用同一个 ClaudeSession
   → _is_new = False
-  → qodercli --resume 1357a4e9-...  (不传 --system-prompt)
-  → Qoder 自动加载前一轮对话历史
+  → claude --resume 1357a4e9-...  (不传 --system-prompt)
+  → Claude 自动加载前一轮对话历史
 
 第3轮: "帮我查一下RK3506"  (不同问题)
   → UUID v5 = abc4bb8b-... (新 UUID)
   → 全新独立会话
 ```
 
-**关键**: Qoder 通过 `--resume` 自己管理对话历史（存在 `/root/.qoder/projects/`），Biblebot 不存储任何对话内容。
+**关键**: Claude 通过 `--resume` 自己管理对话历史（存在 `/root/.claude/projects/`），Biblebot 不存储任何对话内容。
 
 ---
 
@@ -297,8 +297,8 @@ data: [DONE]
 
 | 变量 | 用途 | 必需 |
 |------|------|------|
-| `QODER_PERSONAL_ACCESS_TOKEN` | Qoder 认证 | ✅ |
-| `QODER_DEBUG` | 开启 DEBUG 日志 (`true`/`1`) | ❌ |
+| `ANTHROPIC_API_KEY` | Claude 认证 | ✅ |
+| `BIBLEBOT_DEBUG` (兼容 `QODER_DEBUG`) | 开启 DEBUG 日志 (`true`/`1`) | ❌ |
 | `LLM_API_KEY` | 查询重写 LLM API Key | ❌ |
 | `EMBEDDING_API_KEY` | 硅基流动 Embedding API Key | ✅ |
 | `RERANK_API_KEY` | 硅基流动 Rerank API Key | ✅ |

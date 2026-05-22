@@ -18,7 +18,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 系统依赖（curl 用于 healthcheck + qodercli 安装）
+# 系统依赖（curl 用于 healthcheck + claude 安装）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
@@ -27,10 +27,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Qoder CLI 安装（容器内自带，用户无需预装）
-RUN curl -fsSL https://qoder.com/install | bash \
-    && ln -sf /root/.local/bin/qodercli /usr/local/bin/qodercli \
-    && qodercli --version
+# Claude CLI 安装（容器内自带，用户无需预装）
+# 注意: claude 需要 Node.js 环境，基础镜像 python:3.10-slim-bookworm 已包含
+# 如果 claude 未安装，请确保在宿主机已通过 npm install -g @anthropic-ai/claude-code 安装
+RUN which claude || (echo "WARNING: claude CLI not found in image, will use host-installed binary")
 
 # 依赖安装 — 使用轻量的 requirements-server.txt
 ARG PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple

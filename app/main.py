@@ -10,7 +10,7 @@ import uvicorn
 # ── 日志配置 ──────────────────────────────────────────────
 logger.remove()
 
-_debug = os.environ.get("QODER_DEBUG", "").lower() in ("1", "true", "yes")
+_debug = os.environ.get("BIBLEBOT_DEBUG", os.environ.get("QODER_DEBUG", "")).lower() in ("1", "true", "yes")
 _log_level = "DEBUG" if _debug else "INFO"
 
 # console 日志（Docker 中通过 docker logs 可见）
@@ -72,7 +72,7 @@ async def root():
         "message": "Biblebot Knowledge Server is running.",
         "version": "3.0.0",
         "architecture": "轻RAG + 强探索",
-        "agent_runtime": "Qoder CLI",
+        "agent_runtime": "Claude CLI",
         "endpoints": {
             "rag": "/api/query - RAG 语义检索",
             "openai_compat": "/v1/chat/completions - OpenAI 兼容 Agent API",

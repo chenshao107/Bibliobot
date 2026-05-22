@@ -1,7 +1,7 @@
 """
-会话池 — 管理 QoderSession 生命周期
+会话池 — 管理 ClaudeSession 生命周期
 
-- session_key → QoderSession 映射
+- session_key → ClaudeSession 映射
 - 空闲超时自动清理
 - 线程安全（asyncio.Lock）
 """
@@ -13,7 +13,7 @@ import uuid
 from typing import Dict, Optional, Tuple
 from loguru import logger
 
-from app.agent.qoder_session import QoderSession
+from app.agent.claude_session import ClaudeSession
 
 # 默认配置
 DEFAULT_IDLE_TIMEOUT = 3600       # 1小时空闲自动销毁
@@ -36,14 +36,14 @@ def make_session_key(messages: list) -> str:
 
 
 class SessionPool:
-    """Qoder CLI 会话池"""
+    """Claude CLI 会话池"""
 
     def __init__(
         self,
         idle_timeout: int = DEFAULT_IDLE_TIMEOUT,
         max_sessions: int = 50,
     ):
-        self._sessions: Dict[str, Tuple[QoderSession, float]] = {}
+        self._sessions: Dict[str, Tuple[ClaudeSession, float]] = {}
         self._lock = asyncio.Lock()
         self._idle_timeout = idle_timeout
         self._max_sessions = max_sessions
@@ -65,7 +65,7 @@ class SessionPool:
         session_key: str,
         system_prompt: str = "",
         knowledge_base: str = "data/canonical_md",
-    ) -> QoderSession:
+    ) -> ClaudeSession:
         """获取或创建会话"""
         async with self._lock:
             now = time.time()
@@ -85,7 +85,7 @@ class SessionPool:
                 del self._sessions[oldest_key]
 
             # 创建新会话
-            session = QoderSession(
+            session = ClaudeSession(
                 session_id=session_key,
                 system_prompt=system_prompt,
                 knowledge_base=knowledge_base,

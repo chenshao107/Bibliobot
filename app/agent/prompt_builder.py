@@ -1,5 +1,5 @@
 """
-Prompt 构建器 — 组装 Qoder CLI 的 SYSTEM_PROMPT
+Prompt 构建器 — 组装 Claude CLI 的 SYSTEM_PROMPT
 
 来源：
 1. prompts/*.txt                    → 基础模板
@@ -22,9 +22,8 @@ PATCHES_FILE = OVERRIDE_DIR / "patches.yaml"
 
 # 内置注入的 RAG 工具说明
 RAG_TOOL_INJECTION = """
-🔍 知识库搜索（优先使用，不要跳过！）：
-- Bash: scripts/rag_search.sh "查询词"   语义搜索知识库，返回候选文档路径+摘要
-  这是你最重要的搜索工具，任何知识库查询都应该先调它
+🔍 知识库RAG搜索（优先使用）：
+- Bash: scripts/rag_search.sh "查询词"   语义搜索知识库，返回候选文档路径+摘要，用户初步定位文档阅读方向。
 
 data/raw/     原始文档（pdf/docx等），不要直接读
 data/canonical_md/  已转换的Markdown文件，优先读这里

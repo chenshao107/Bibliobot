@@ -6,7 +6,7 @@ from loguru import logger
 from app.services.rag.retriever import RAGEngine
 from app.core.config import settings
 from app.agent.session_pool import SessionPool, make_session_key
-from app.agent.qoder_session import StreamChunk
+from app.agent.claude_session import StreamChunk
 from app.agent.prompt_builder import build_system_prompt
 import json
 import time
@@ -177,7 +177,7 @@ def _messages_to_openai_format(messages: List[ChatMessage]) -> list:
 async def chat_completions(request: ChatCompletionRequest):
     """
     OpenAI 兼容的 Chat Completions 端点。
-    由 Qoder CLI Agent 接管对话。
+    由 Claude CLI Agent 接管对话。
     """
     # 生成 session key
     raw_messages = _messages_to_openai_format(request.messages)

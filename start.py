@@ -2,10 +2,10 @@
 """
 Biblebot 启动脚本
 
-Agent Runtime: Qoder CLI
+Agent Runtime: Claude CLI
 
 用法:
-    python start.py              # 默认启动 Qoder CLI Agent
+    python start.py              # 默认启动 Claude CLI Agent
     python start.py --server     # 仅启动 RAG 后端服务
     python start.py --debug      # 详细日志模式
 """
@@ -43,13 +43,24 @@ def check_requirements():
     return issues
 
 
-def start_rag_server(debug=False):
+def start_rag_server(debug=False, dev=False):
     """启动 RAG 服务"""
-    print(f"\n{GREEN}Starting Biblebot RAG Server...{RESET}")
-    print(f"{GREEN}  API:  http://localhost:8000/api/query{RESET}")
-    print(f"{GREEN}  Docs: http://localhost:8000/docs{RESET}\n")
+    if dev:
+        os.environ.setdefault("BIBLEBOT_DEBUG", "1")
+        print(f"{YELLOW}🔧 DEV 模式: BIBLEBOT_DEBUG=1, 所有 claude 命令行 + Debug 日志可见{RESET}")
+    elif debug:
+        os.environ.setdefault("BIBLEBOT_DEBUG", "1")
 
-    log_level = "debug" if debug else "info"
+    print(f"\n{GREEN}Starting Biblebot RAG Server...{RESET}")
+    print(f"{GREEN}  API:   http://localhost:8000/v1/chat/completions{RESET}")
+    print(f"{GREEN}  Docs:  http://localhost:8000/docs{RESET}")
+    print(f"{GREEN}  Logs:  logs/biblebot_$(date +%Y-%m-%d).log{RESET}")
+    if dev or debug:
+        print(f"{YELLOW}  Debug: BIBLEBOT_DEBUG=1 — 终端实时显示所有日志 + claude 命令行{RESET}")
+        print(f"{YELLOW}  复现: 从日志复制 [CLAUDE_CMD] 即可手动执行{RESET}")
+    print()
+
+    log_level = "debug" if (debug or dev) else "info"
 
     cmd = [
         sys.executable, "-m", "uvicorn",
@@ -90,16 +101,16 @@ def _check_knowledge_base():
     return knowledge_path
 
 
-def start_qoder_cli():
-    """启动 Qoder CLI Agent（默认，对 DeepSeek 等模型支持更好）"""
+def start_claude():
+    """启动 Claude CLI Agent"""
     knowledge_path = _check_knowledge_base()
 
-    print(f"\n{GREEN}Starting Qoder CLI Agent with Biblebot...{RESET}")
+    print(f"\n{GREEN}Starting Claude CLI Agent with Biblebot...{RESET}")
     print(f"{GREEN}  Knowledge Base: {knowledge_path}{RESET}")
     print(f"{GREEN}  RAG Tool: scripts/rag_search.sh 'query'{RESET}\n")
 
     cmd = [
-        "qodercli",
+        "claude",
         "--add-dir", str(knowledge_path),
         "--append-system-prompt", SYSTEM_PROMPT,
     ]
@@ -107,17 +118,18 @@ def start_qoder_cli():
     try:
         subprocess.run(cmd)
     except KeyboardInterrupt:
-        print(f"\n{YELLOW}Qoder CLI stopped{RESET}")
+        print(f"\n{YELLOW}Claude CLI stopped{RESET}")
     except FileNotFoundError:
-        print(f"{RED}Qoder CLI 未安装或不在 PATH 中{RESET}")
-        print(f"{YELLOW}请确认 qodercli 已正确安装并加入 PATH{RESET}")
+        print(f"{RED}Claude CLI 未安装或不在 PATH 中{RESET}")
+        print(f"{YELLOW}请确认 claude 已正确安装并加入 PATH{RESET}")
         sys.exit(1)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Biblebot 启动脚本 (Qoder CLI)")
+    parser = argparse.ArgumentParser(description="Biblebot 启动脚本 (Claude CLI)")
     parser.add_argument("--server", action="store_true", help="仅启动 RAG 后端服务（不启动 Agent）")
-    parser.add_argument("--debug", action="store_true", help="详细日志模式")
+    parser.add_argument("--debug", action="store_true", help="详细日志模式（BIBLEBOT_DEBUG=1，兼容 QODER_DEBUG=1）")
+    parser.add_argument("--dev", action="store_true", help="开发模式: --server + --debug + 彩色提示")
     args = parser.parse_args()
 
     issues = check_requirements()
@@ -125,10 +137,10 @@ def main():
         for issue in issues:
             print(f"{YELLOW}WARNING: {issue}{RESET}")
 
-    if args.server:
-        start_rag_server(debug=args.debug)
+    if args.server or args.dev:
+        start_rag_server(debug=args.debug, dev=args.dev)
     else:
-        start_qoder_cli()
+        start_claude()
 
 
 if __name__ == "__main__":

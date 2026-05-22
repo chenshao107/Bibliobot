@@ -1,8 +1,8 @@
 """
-Qoder CLI 会话管理 — 封装 qodercli 子进程，支持 SSE 流式输出。
+Claude CLI 会话管理 — 封装 claude 子进程，支持 SSE 流式输出。
 
 架构：
-- 每个消息启动一次 qodercli -p，Qoder 自己的 session 文件管理对话历史
+- 每个消息启动一次 claude -p，Claude 自己的 session 文件管理对话历史
 - 新会话: --session-id <id> --system-prompt "..."
 - 续接:   --resume <id>
 - 输出:   --output-format stream-json → 逐行 NDJSON → SSE
@@ -17,20 +17,20 @@ from pathlib import Path
 from typing import AsyncIterator, Optional
 from loguru import logger
 
-def _find_qodercli() -> str:
-    """自动发现 qodercli 二进制，处理 Docker volume 挂载导致 symlink 过期的情况"""
+def _find_claude() -> str:
+    """自动发现 claude 二进制，处理 Docker volume 挂载导致 symlink 过期的情况"""
     # 1. 先尝试 PATH
-    found = shutil.which("qodercli")
+    found = shutil.which("claude")
     if found and os.path.isfile(found):
         return found
-    # 2. 搜索安装目录（Docker 中 /root/.qoder 被 volume 覆盖时 symlink 可能断链）
+    # 2. 搜索安装目录（Docker 中 ~/.claude 被 volume 覆盖时 symlink 可能断链）
     import glob
-    for base in ("/root/.qoder/bin/qodercli", os.path.expanduser("~/.qoder/bin/qodercli")):
-        versions = sorted(glob.glob(f"{base}/qodercli-*"), reverse=True)
+    for base in ("/root/.claude/bin/claude", os.path.expanduser("~/.claude/bin/claude")):
+        versions = sorted(glob.glob(f"{base}/claude-*"), reverse=True)
         for v in versions:
             if os.path.isfile(v) and os.access(v, os.X_OK):
                 # 同时修复断链的 symlink
-                local_link = os.path.expanduser("~/.local/bin/qodercli")
+                local_link = os.path.expanduser("~/.local/bin/claude")
                 try:
                     if os.path.islink(local_link):
                         os.unlink(local_link)
@@ -38,14 +38,14 @@ def _find_qodercli() -> str:
                 except OSError:
                     pass
                 return v
-    return "qodercli"
+    return "claude"
 
-QODERCLI_BIN = _find_qodercli()
+CLAUDE_BIN = _find_claude()
 
 
 @dataclass
 class StreamChunk:
-    """qodercli 输出的一个流式块"""
+    """claude 输出的一个流式块"""
     kind: str          # "text" | "tool_call" | "tool_result" | "error"
     content: str = ""
     tool_name: str = ""
@@ -53,17 +53,21 @@ class StreamChunk:
     tool_output: str = ""
 
 
-class QoderSession:
-    """管理单个 Qoder CLI 会话"""
+class ClaudeSession:
+    """管理单个 Claude CLI 会话"""
 
     def __init__(
         self,
         session_id: str,
         system_prompt: str = "",
         knowledge_base: str = "data/canonical_md",
-        permission_mode: str = "bypass_permissions",
+        permission_mode: str = "bypassPermissions",
     ):
-        self.session_id = session_id
+        # pool_key: 由消息指纹生成（UUID v5），仅用于 session_pool 内部查找
+        # session_id: 每次新建时生成全新 UUID4，避免与历史 session 锁冲突
+        import uuid
+        self.pool_key = session_id
+        self.session_id = str(uuid.uuid4())
         self.system_prompt = system_prompt
         self.knowledge_base = str(Path(knowledge_base).absolute())
         self.permission_mode = permission_mode
@@ -73,7 +77,7 @@ class QoderSession:
         """发送消息并返回流式块（含工具调用/结果）"""
         cmd = self._build_command(message)
         cmd_log = self._format_cmd_for_log(cmd)
-        logger.info(f"Qoder session={self.session_id} is_new={self._is_new}\n[QODER_CMD] {cmd_log}")
+        logger.info(f"Claude session={self.session_id} is_new={self._is_new}\n[CLAUDE_CMD] {cmd_log}")
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -82,17 +86,26 @@ class QoderSession:
             stderr=asyncio.subprocess.PIPE,
         )
 
+        new_session_id = None  # fork-session 产生的新 ID
         try:
             async for chunk in self._parse_stream(proc):
+                if chunk.kind == "_init" and chunk.content:
+                    new_session_id = chunk.content
+                    continue  # init 消息不对外暴露
                 yield chunk
             await asyncio.wait_for(proc.wait(), timeout=30)
             if proc.returncode != 0:
                 stderr = (await proc.stderr.read()).decode(errors="replace")
-                logger.error(f"qodercli exit={proc.returncode} session={self.session_id}: {stderr[:500]}")
+                logger.error(f"claude exit={proc.returncode} session={self.session_id}: {stderr[:500]}")
         finally:
             if proc.returncode is None:
                 proc.kill()
                 await proc.wait()
+
+        # fork-session 后更新 session_id，下次 resume 用新 ID
+        if new_session_id:
+            logger.info(f"Session forked: {self.session_id} → {new_session_id}")
+            self.session_id = new_session_id
         self._is_new = False
 
     def _format_cmd_for_log(self, cmd: list) -> str:
@@ -125,15 +138,14 @@ class QoderSession:
         return " \\\n  ".join(parts)
 
     def _build_command(self, message: str) -> list:
-        cmd = [QODERCLI_BIN, "-p", "--output-format", "stream-json",
-               "--max-output-tokens", "32k"]
+        cmd = [CLAUDE_BIN, "-p", "--output-format", "stream-json", "--verbose"]
 
         if self._is_new:
             cmd += ["--session-id", self.session_id]
             if self.system_prompt:
                 cmd += ["--system-prompt", self.system_prompt]
         else:
-            cmd += ["--resume", self.session_id]
+            cmd += ["--resume", self.session_id, "--fork-session"]
 
         cmd += [
             "--add-dir", self.knowledge_base,
@@ -143,7 +155,7 @@ class QoderSession:
         return cmd
 
     async def _parse_stream(self, proc: asyncio.subprocess.Process) -> AsyncIterator[StreamChunk]:
-        """解析 qodercli stream-json 输出，提取所有有意义的事件"""
+        """解析 claude stream-json 输出，提取所有有意义的事件"""
         buffer = b""
         pending_tool = {"name": "", "input": ""}  # 累积 tool_use + tool_result 配对
 
@@ -164,7 +176,7 @@ class QoderSession:
 
             obj_type = obj.get("type", "")
             # 原始消息 dump（debug 用）
-            logger.debug(f"[QODER_RAW] type={obj_type} keys={list(obj.keys())} "
+            logger.debug(f"[CLAUDE_RAW] type={obj_type} keys={list(obj.keys())} "
                         f"preview={json.dumps(obj, ensure_ascii=False)[:300]}")
 
             if obj_type == "assistant":
@@ -199,6 +211,13 @@ class QoderSession:
                     yield StreamChunk(kind="text", content=content)
 
             elif obj_type == "system":
+                # 检查是否是 init 消息（含 session_id，fork-session 后会变）
+                if obj.get("subtype") == "init":
+                    sid = obj.get("session_id", "")
+                    if sid:
+                        yield StreamChunk(kind="_init", content=sid)
+                    continue
+
                 # 系统消息 — 尝试从中提取工具执行信息
                 message_obj = obj.get("message", {})
                 content = message_obj.get("content", [])
@@ -222,14 +241,14 @@ class QoderSession:
 
             elif obj_type == "error":
                 err_msg = obj.get("message", "unknown error")
-                logger.error(f"Qoder error: {err_msg}")
+                logger.error(f"Claude error: {err_msg}")
                 yield StreamChunk(kind="error", content=str(err_msg))
 
-    def fork(self) -> "QoderSession":
+    def fork(self) -> "ClaudeSession":
         """创建分叉会话（用于编辑/回滚场景）"""
         import uuid
-        new_id = f"{self.session_id}-fork-{uuid.uuid4().hex[:8]}"
-        new_session = QoderSession(
+        new_id = f"{self.pool_key}-fork-{uuid.uuid4().hex[:8]}"
+        new_session = ClaudeSession(
             session_id=new_id,
             system_prompt=self.system_prompt,
             knowledge_base=self.knowledge_base,

@@ -1,6 +1,6 @@
 # Biblebot - Agent API 服务
 # Qdrant 向量数据库 + Biblebot API 服务（OpenAI 兼容 + RAG）
-# Agent Runtime: Qoder CLI（通过 QODER_PERSONAL_ACCESS_TOKEN 认证，无需预装）
+# Agent Runtime: Claude CLI（通过 ANTHROPIC_API_KEY 认证）
 
 version: '3.8'
 
@@ -47,8 +47,8 @@ services:
           size: 256M
       # 配置文件
       - ../.env:/app/.env:ro
-      # Qoder session 持久化（对话历史保存在宿主机）
-      - qoder-sessions:/root/.qoder
+      # Claude session 持久化（对话历史保存在宿主机）
+      - claude-sessions:/root/.claude
     env_file:
       - ../.env
     environment:
@@ -67,7 +67,7 @@ services:
 volumes:
   qdrant-storage:
     driver: local
-  qoder-sessions:
+  claude-sessions:
     driver: local
 
 networks:

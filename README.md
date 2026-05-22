@@ -1,11 +1,11 @@
 # Biblebot — 企业知识探索 Agent
 
-基于 **轻RAG + 强探索** 架构的企业知识库 Agent 系统。RAG 负责定位文档，Qoder CLI 作为 Agent Runtime 负责探索与分析。
+基于 **轻RAG + 强探索** 架构的企业知识库 Agent 系统。RAG 负责定位文档，Claude CLI 作为 Agent Runtime 负责探索与分析。
 
 ## 架构
 
 ```
-用户 ──→ Qoder CLI (Agent Runtime)
+用户 ──→ Claude CLI (Agent Runtime)
               │  ┌─ Bash (cat/grep/rg/find/tree) ─→ 探索知识库
               │  └─ python scripts/rag_search.py ─→ 语义检索 RAG 后端
               │
@@ -16,7 +16,7 @@
 ```
 
 - **RAG 后端**: 语义搜索返回文档路径 + 片段（仅定位，不返回完整答案）
-- **Agent**: Qoder CLI 原生 Bash/Read/Grep 等工具探索知识库，`rag_search` CLI 工具辅助定位
+- **Agent**: Claude CLI 原生 Bash/Read/Grep 等工具探索知识库，`rag_search` CLI 工具辅助定位
 - **知识库**: `data/canonical_md` 以只读方式挂载，Agent 不可修改
 
 ## 快速开始
@@ -51,14 +51,11 @@ python scripts/ingest_folder.py
 ### 4. 启动 Agent
 
 ```bash
-# 默认使用 Qoder CLI
+# 默认使用 Claude CLI
 python start.py
 
 # 仅启动 RAG 后端（不启动 Agent）
 python start.py --server
-
-# 备选：使用 Claude CLI
-python start.py --claude
 ```
 
 ### 5. 测试 RAG 检索
