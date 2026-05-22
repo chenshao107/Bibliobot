@@ -54,7 +54,7 @@
 8. [ ] 更新 docker/docker-compose.yml - 加上claude依赖说明
 
 ### Phase 4: 进阶功能 [P1-P2]
-9.  [ ] 恢复 app/agent/tools/mcp_client.py - MCP工具接入
+9.  [x] MCP工具接入 — Claude CLI 原生支持 --mcp-config，用户通过 mcp_config.json 自行配置
 10. [ ] 用户自定义CLI脚本挂载点
 11. [ ] 编辑/回滚场景 - fork-session支持
 12. [ ] 会话列表API - /v1/conversations (可选)

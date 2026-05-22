@@ -25,6 +25,7 @@ wheels/
 # 环境配置（包含敏感信息）
 .env
 RAG_env.txt
+mcp_config.json
 
 # IDE
 .idea/

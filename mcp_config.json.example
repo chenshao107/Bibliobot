@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "phabricator": {
+      "command": "node",
+      "args": [
+        "/path/to/phabricator-mcp/dist/index.js"
+      ],
+      "env": {
+        "PHABRICATOR_URL": "http://172.16.1.9:8080/",
+        "PHABRICATOR_API_TOKEN": "api-your-token-here"
+      }
+    }
+  }
+}

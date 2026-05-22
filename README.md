@@ -66,6 +66,20 @@ python scripts/rag_search.py "你的问题" --json
 
 或访问 `http://localhost:8000/docs` 使用 Swagger UI 测试 API。
 
+### 6. (可选) 对接 MCP 服务器
+
+Claude CLI 原生支持 MCP (Model Context Protocol)，可接入外部工具如 Phabricator、Jira 等：
+
+```bash
+# 复制模板并编辑
+cp mcp_config.json.example mcp_config.json
+# 编辑 mcp_config.json 填入你的 MCP 服务器配置
+```
+
+配置后无需重启服务，claude 子进程会自动加载。支持两种方式：
+- **文件方式**(推荐)：`.env` 中设置 `MCP_CONFIG_PATH=mcp_config.json`
+- **内联方式**：`.env` 中设置 `MCP_CONFIG_JSON={"mcpServers":{...}}`
+
 ## 目录结构
 
 ```

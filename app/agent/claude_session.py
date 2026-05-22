@@ -17,6 +17,39 @@ from pathlib import Path
 from typing import AsyncIterator, Optional
 from loguru import logger
 
+# ── MCP 配置读取 ──────────────────────────────────────────
+def _get_mcp_config_args() -> list:
+    """从环境变量读取 MCP 配置，返回 claude --mcp-config 参数列表
+    
+    支持两种方式（优先级从高到低）：
+    1. MCP_CONFIG_JSON — 直接写 JSON 字符串
+    2. MCP_CONFIG_PATH — JSON 配置文件路径
+    """
+    # 方式1: 直接 JSON 字符串
+    mcp_json = os.environ.get("MCP_CONFIG_JSON", "").strip()
+    if mcp_json:
+        try:
+            json.loads(mcp_json)  # 验证 JSON 格式
+            return ["--mcp-config", mcp_json]
+        except json.JSONDecodeError:
+            logger.warning("MCP_CONFIG_JSON is not valid JSON, ignoring")
+
+    # 方式2: JSON 配置文件
+    mcp_path = os.environ.get("MCP_CONFIG_PATH", "").strip()
+    if mcp_path:
+        config_file = Path(mcp_path)
+        if not config_file.is_absolute():
+            # 相对路径相对于项目根目录
+            project_root = Path(__file__).resolve().parent.parent.parent
+            config_file = project_root / mcp_path
+        if config_file.exists():
+            logger.info(f"Loading MCP config from: {config_file}")
+            return ["--mcp-config", str(config_file)]
+        else:
+            logger.debug(f"MCP config file not found: {config_file}, skipping")
+
+    return []
+
 def _find_claude() -> str:
     """自动发现 claude 二进制，处理 Docker volume 挂载导致 symlink 过期的情况"""
     # 1. 先尝试 PATH
@@ -139,6 +172,9 @@ class ClaudeSession:
 
     def _build_command(self, message: str) -> list:
         cmd = [CLAUDE_BIN, "-p", "--output-format", "stream-json", "--verbose"]
+
+        # MCP 配置（从环境变量读取，用户自行配置 mcp_config.json）
+        cmd += _get_mcp_config_args()
 
         if self._is_new:
             cmd += ["--session-id", self.session_id]
