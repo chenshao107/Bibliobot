@@ -105,9 +105,20 @@ class ClaudeSession:
         self.knowledge_base = str(Path(knowledge_base).absolute())
         self.permission_mode = permission_mode
         self._is_new = True
+        self._send_lock = asyncio.Lock()  # 串行化 send_message，防止并发时 session_id 冲突
 
     async def send_message(self, message: str) -> AsyncIterator[StreamChunk]:
-        """发送消息并返回流式块（含工具调用/结果）"""
+        """发送消息并返回流式块（含工具调用/结果）
+        
+        串行化保护：同一 session 的多个并发请求会排队，防止两个 claude 进程
+        同时争夺 `--session-id` 导致 "already in use" 错误。
+        """
+        async with self._send_lock:
+            async for chunk in self._send_message_impl(message):
+                yield chunk
+
+    async def _send_message_impl(self, message: str) -> AsyncIterator[StreamChunk]:
+        """实际发送逻辑（已由 send_message 加锁保护）"""
         cmd = self._build_command(message)
         cmd_log = self._format_cmd_for_log(cmd)
         logger.info(f"Claude session={self.session_id} is_new={self._is_new}\n[CLAUDE_CMD] {cmd_log}")

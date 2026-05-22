@@ -16,6 +16,10 @@ import sys
 import os
 from pathlib import Path
 
+# 加载 .env 到 os.environ（需在 import app 之前，确保所有模块都能读到环境变量）
+from dotenv import load_dotenv
+load_dotenv()
+
 # 自动检测并激活虚拟环境
 _PROJECT_DIR = Path(__file__).resolve().parent
 _VENV_PYTHON = _PROJECT_DIR / ".venv" / "bin" / "python"

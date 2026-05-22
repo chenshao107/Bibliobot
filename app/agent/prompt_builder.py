@@ -4,9 +4,10 @@ Prompt 构建器 — 组装 Claude CLI 的 SYSTEM_PROMPT
 来源：
 1. prompts/*.txt                    → 基础模板
 2. prompts_override/patches.yaml    → 用户 YAML 补丁（after/before/replace/append_line）
-3. 内置注入                          → RAG 工具说明、知识库路径
+3. 内置注入                          → RAG 工具说明、知识库路径、MCP 工具列表
 """
 
+import json
 import os
 from pathlib import Path
 from typing import Dict
@@ -28,6 +29,49 @@ RAG_TOOL_INJECTION = """
 data/raw/     原始文档（pdf/docx等），不要直接读
 data/canonical_md/  已转换的Markdown文件，优先读这里
 """
+
+
+def _build_mcp_injection() -> str:
+    """检测 MCP 配置，生成 MCP 工具可用性提示"""
+    # 方式1: MCP_CONFIG_JSON 直接字符串
+    mcp_json = os.environ.get("MCP_CONFIG_JSON", "").strip()
+    if mcp_json:
+        try:
+            cfg = json.loads(mcp_json)
+        except json.JSONDecodeError:
+            cfg = None
+    else:
+        # 方式2: MCP_CONFIG_PATH 配置文件
+        mcp_path = os.environ.get("MCP_CONFIG_PATH", "").strip()
+        if mcp_path:
+            config_file = Path(mcp_path)
+            if not config_file.is_absolute():
+                config_file = PROJECT_ROOT / mcp_path
+            if config_file.exists():
+                try:
+                    cfg = json.loads(config_file.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    cfg = None
+            else:
+                cfg = None
+        else:
+            cfg = None
+
+    if not cfg:
+        return ""
+
+    servers = cfg.get("mcpServers", {})
+    if not servers:
+        return ""
+
+    lines = ["🌐 已连接的 MCP 外部服务："]
+    for name, svr in servers.items():
+        desc = svr.get("description", "") if isinstance(svr, dict) else ""
+        if desc:
+            lines.append(f"- {desc}: 通过 {name} MCP 工具集调用，不要手动 curl/wget 访问")
+        else:
+            lines.append(f"- {name}: 通过 {name} MCP 工具集调用，不要手动 curl/wget 访问")
+    return "\n".join(lines)
 
 
 def _load_prompts() -> Dict[str, str]:
@@ -95,5 +139,10 @@ def build_system_prompt() -> str:
     # 注入 RAG 工具说明（替换 tools 中的占位符）
     prompt = "\n\n".join(parts)
     prompt = prompt.replace("{{TOOLS_PLACEHOLDER}}", RAG_TOOL_INJECTION.strip())
+
+    # 注入 MCP 工具可用性（如有配置）
+    mcp_injection = _build_mcp_injection()
+    if mcp_injection:
+        prompt += "\n\n" + mcp_injection
 
     return prompt

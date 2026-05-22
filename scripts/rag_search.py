@@ -5,6 +5,7 @@ rag_search - 企业知识库语义搜索 CLI 工具
 遵循"轻RAG + 强探索"原则：
 - RAG 只负责"定位"候选文档（返回路径 + 分数 + 片段）
 - Agent 负责"探索"获取精确答案
+- 内部已包含query改写
 
 用法:
     python scripts/rag_search.py "你的问题"

@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     RAG_SEARCH_DEFAULT_TOP_K: int = 5
     RAG_SEARCH_MAX_SNIPPET_LEN: int = 200
 
+    # MCP 配置路径（可选，不为 pydantic 忽略）
+    MCP_CONFIG_PATH: str = ""
+    MCP_CONFIG_JSON: str = ""
+
     # 线程池配置
     THREAD_POOL_MAX_WORKERS: int = 32
 
