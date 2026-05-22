@@ -155,24 +155,38 @@ class ClaudeSession:
         return cmd
 
     async def _parse_stream(self, proc: asyncio.subprocess.Process) -> AsyncIterator[StreamChunk]:
-        """解析 claude stream-json 输出，提取所有有意义的事件"""
-        buffer = b""
+        """解析 claude stream-json 输出，提取所有有意义的事件
+        
+        使用 read() 分块 + 手动换行拆分，避免 asyncio readline() 的 64KB 缓冲区限制。
+        """
+        raw_buffer = b""  # 原始字节缓冲（按块读取）
+        line_buffer = b""  # 累积的未完成行
         pending_tool = {"name": "", "input": ""}  # 累积 tool_use + tool_result 配对
 
         while True:
             try:
-                line = await asyncio.wait_for(proc.stdout.readline(), timeout=300)
+                chunk = await asyncio.wait_for(proc.stdout.read(65536), timeout=300)
             except asyncio.TimeoutError:
                 logger.warning(f"Session {self.session_id} stdout timeout")
                 break
-            if not line:
+            if not chunk:
                 break
 
-            try:
-                obj = json.loads(line.decode())
-            except json.JSONDecodeError:
-                buffer += line
-                continue
+            raw_buffer += chunk
+            # 按换行拆分：完整行逐个处理，不完整的留到下一次
+            while b"\n" in raw_buffer:
+                line_bytes, raw_buffer = raw_buffer.split(b"\n", 1)
+                # 如有上次残留，拼接到前面
+                if line_buffer:
+                    line_bytes = line_buffer + line_bytes
+                    line_buffer = b""
+
+                try:
+                    obj = json.loads(line_bytes.decode())
+                except json.JSONDecodeError:
+                    # JSON 解析失败，可能是被截断的超长行，保存到 line_buffer 等后续 chunk
+                    line_buffer = line_bytes
+                    continue
 
             obj_type = obj.get("type", "")
             # 原始消息 dump（debug 用）
@@ -213,9 +227,13 @@ class ClaudeSession:
             elif obj_type == "system":
                 # 检查是否是 init 消息（含 session_id，fork-session 后会变）
                 if obj.get("subtype") == "init":
-                    sid = obj.get("session_id", "")
+                    # claude 可能用 session_id 或 sessionId
+                    sid = obj.get("session_id", "") or obj.get("sessionId", "")
                     if sid:
+                        logger.debug(f"[CLAUDE_INIT] new session_id={sid} (keys={list(obj.keys())})")
                         yield StreamChunk(kind="_init", content=sid)
+                    else:
+                        logger.warning(f"[CLAUDE_INIT] no session_id found in init: {json.dumps(obj, ensure_ascii=False)[:500]}")
                     continue
 
                 # 系统消息 — 尝试从中提取工具执行信息

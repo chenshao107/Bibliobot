@@ -10,8 +10,31 @@ from app.agent.claude_session import StreamChunk
 from app.agent.prompt_builder import build_system_prompt
 import json
 import time
+from datetime import datetime
+from pathlib import Path
 
 router = APIRouter()
+
+# ── 交互报文日志 ──────────────────────────────────────────
+_INTERACTION_LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
+_INTERACTION_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+def _log_interaction(direction: str, session_key: str, payload: dict):
+    """记录每次 HTTP 交互的完整报文到 logs/interactions_YYYY-MM-DD.log"""
+    try:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        log_file = _INTERACTION_LOG_DIR / f"interactions_{date_str}.log"
+        line = json.dumps({
+            "timestamp": ts,
+            "direction": direction,  # "request" or "response"
+            "session_key": session_key,
+            "payload": payload,
+        }, ensure_ascii=False, default=str)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass  # 报文日志不影响主流程
 
 # 全局会话池
 _session_pool: Optional[SessionPool] = None
@@ -168,6 +191,17 @@ def _extract_last_user_message(messages: List[ChatMessage]) -> str:
     return ""
 
 
+def _is_openwebui_internal(text: str) -> bool:
+    """检测 Open WebUI 自动生成的内部消息（标题/标签/追问），不应调用 Agent"""
+    markers = [
+        "### Task:",
+        "Suggest 3-5 relevant follow-up",
+        "Generate a concise, 3-5 word title",
+        "Generate 1-3 broad tags",
+    ]
+    return any(m in text for m in markers)
+
+
 def _messages_to_openai_format(messages: List[ChatMessage]) -> list:
     """将 Pydantic ChatMessage 转为 dict 列表"""
     return [{"role": m.role, "content": m.content} for m in messages]
@@ -183,10 +217,40 @@ async def chat_completions(request: ChatCompletionRequest):
     raw_messages = _messages_to_openai_format(request.messages)
     session_key = request.user or make_session_key(raw_messages)
 
+    # 记录请求报文
+    _log_interaction("request", session_key, {
+        "model": request.model,
+        "stream": request.stream,
+        "user_override": request.user,
+        "messages": raw_messages,
+    })
+
     # 提取用户消息
     user_message = _extract_last_user_message(request.messages)
     if not user_message:
         raise HTTPException(status_code=400, detail="No user message found")
+
+    # 过滤 Open WebUI 内部消息（标题生成/标签生成/追问建议），直接返回空响应
+    if _is_openwebui_internal(user_message):
+        logger.debug(f"Filtered Open WebUI internal message: {user_message[:100]}...")
+        filtered_resp = {"filtered": True, "reason": "openwebui_internal", "content": ""}
+        _log_interaction("response", session_key, filtered_resp)
+        if request.stream:
+            async def _empty_stream():
+                yield f"data: {json.dumps({'choices': [{'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
+                yield "data: [DONE]\n\n"
+            return StreamingResponse(_empty_stream(), media_type="text/event-stream")
+        else:
+            return ChatCompletionResponse(
+                id=f"chatcmpl-filtered-{session_key}",
+                created=int(time.time()),
+                model=request.model,
+                choices=[ChatCompletionChoice(
+                    message=ChatMessage(role="assistant", content=""),
+                    finish_reason="stop",
+                )],
+                usage=ChatCompletionUsage(),
+            )
 
     # 获取 system prompt
     system_prompt = build_system_prompt()
@@ -198,12 +262,18 @@ async def chat_completions(request: ChatCompletionRequest):
     completion_id = f"chatcmpl-{session_key}"
 
     if request.stream:
+        # 流式：仅记请求，响应由 SSE 边生成边发送不捕获
         return StreamingResponse(
             _stream_response(session, user_message, completion_id, request.model),
             media_type="text/event-stream",
         )
     else:
         content = await _collect_full_response(session, user_message)
+        _log_interaction("response", session_key, {
+            "stream": False,
+            "content": content,
+            "finish_reason": "stop",
+        })
         return ChatCompletionResponse(
             id=completion_id,
             created=int(time.time()),
