@@ -12,12 +12,4 @@ requests
 loguru
 tqdm
 httpx[socks]
-# Docker 沙箱支持
-docker
-
-# 压测工具
-aiohttp
-
-# MCP (Model Context Protocol) 支持
-# 注意：MCP 服务器需要通过 npx 或 uvx 安装，请确保系统已安装 Node.js 和 Python
-nest_asyncio
+pyyaml

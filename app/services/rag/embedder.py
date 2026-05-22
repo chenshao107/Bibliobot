@@ -1,5 +1,4 @@
 import requests
-from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
 import numpy as np
 from loguru import logger
@@ -10,20 +9,32 @@ import time
 from pathlib import Path
 from collections import Counter
 
-# 尝试导入 tqdm
-try:
-    from tqdm import tqdm
-    HAS_TQDM = True
-except ImportError:
-    HAS_TQDM = False
-    tqdm = None
+# SentenceTransformer 懒加载（仅本地模式需要，服务器用 API 模式无需安装）
+_dense_model = None
+
+
+def _get_dense_model():
+    global _dense_model
+    if _dense_model is None:
+        from sentence_transformers import SentenceTransformer
+        _dense_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
+    return _dense_model
+
+
+# tqdm 懒加载
+def _get_tqdm():
+    try:
+        from tqdm import tqdm
+        return tqdm, True
+    except ImportError:
+        return None, False
 
 class HybridEmbedder:
     def __init__(self):
         self.use_api = settings.USE_EMBEDDING_API
         if not self.use_api:
             logger.info(f"Loading local dense embedding model: {settings.EMBEDDING_MODEL_NAME}")
-            self.dense_model = SentenceTransformer(settings.EMBEDDING_MODEL_NAME)
+            self.dense_model = _get_dense_model()
         else:
             logger.info(f"Using Cloud API for embeddings: {settings.EMBEDDING_API_URL}")
         
@@ -60,16 +71,18 @@ class HybridEmbedder:
             return self._embed_dense_api_batch(texts, batch_size, show_progress, desc)
         
         # 本地模型批量处理，带进度条
-        if show_progress and HAS_TQDM and len(texts) > 1:
-            all_embeddings = []
-            total_batches = (len(texts) + batch_size - 1) // batch_size
-            # position=1 让嵌入进度条显示在文件进度条上方
-            for i in tqdm(range(0, len(texts), batch_size), desc=f"  🔤 {desc}", unit="batch", 
-                         total=total_batches, position=1, leave=False, ncols=90):
-                batch = texts[i:i + batch_size]
-                batch_embeddings = self.dense_model.encode(batch)
-                all_embeddings.extend([emb.tolist() for emb in batch_embeddings])
-            return all_embeddings
+        if show_progress and len(texts) > 1:
+            tqdm, _ = _get_tqdm()
+            if tqdm:
+                all_embeddings = []
+                total_batches = (len(texts) + batch_size - 1) // batch_size
+                # position=1 让嵌入进度条显示在文件进度条上方
+                for i in tqdm(range(0, len(texts), batch_size), desc=f"  🔤 {desc}", unit="batch", 
+                             total=total_batches, position=1, leave=False, ncols=90):
+                    batch = texts[i:i + batch_size]
+                    batch_embeddings = self.dense_model.encode(batch)
+                    all_embeddings.extend([emb.tolist() for emb in batch_embeddings])
+                return all_embeddings
         else:
             # 无进度条或数据量小，直接处理
             embeddings = self.dense_model.encode(texts)
@@ -151,8 +164,12 @@ class HybridEmbedder:
         total_batches = (len(texts) + batch_size - 1) // batch_size
         
         # 创建进度条迭代器
-        if show_progress and HAS_TQDM:
-            batch_iterator = tqdm(range(0, len(texts), batch_size), desc=desc, total=total_batches, unit="batch")
+        if show_progress:
+            tqdm, has_tqdm = _get_tqdm()
+            if has_tqdm:
+                batch_iterator = tqdm(range(0, len(texts), batch_size), desc=desc, total=total_batches, unit="batch")
+            else:
+                batch_iterator = range(0, len(texts), batch_size)
         else:
             batch_iterator = range(0, len(texts), batch_size)
         
@@ -160,7 +177,7 @@ class HybridEmbedder:
             batch = texts[i:i + batch_size]
             batch_num = i // batch_size + 1
             
-            if not show_progress or not HAS_TQDM:
+            if not show_progress or not has_tqdm:
                 logger.info(f"处理批次 {batch_num}/{total_batches}，包含 {len(batch)} 个文本")
             
             max_retries = 3

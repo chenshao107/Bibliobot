@@ -1,62 +1,60 @@
-# Biblebot - 主服务镜像
-# 包含完整的 RAG 服务和 Agent 功能
+# Biblebot - Agent API 服务镜像（OpenAI 兼容 + RAG）
+# 仅包含运行时依赖，不含 torch/flashrank/docling 等数据预处理大包
 
 FROM python:3.10-slim-bookworm
 
-LABEL maintainer="Biblebot Team"
-LABEL description="Biblebot - AI Agent with RAG capabilities"
+# 代理配置（可选构建参数，国内环境通过 docker-compose 传入）
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=${NO_PROXY}
 
-# 设置环境变量
+LABEL maintainer="Biblebot Team"
+LABEL description="Biblebot Agent API Server — OpenAI-compatible endpoint + RAG retrieval"
+
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 安装系统依赖
+# 系统依赖（curl 用于 healthcheck + claude 安装）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # 构建依赖
-    build-essential \
-    gcc \
-    g++ \
-    # 文档处理
-    libmagic1 \
-    # 网络工具
     curl \
-    # Git（用于克隆依赖）
-    git \
-    # 清理
+    ca-certificates \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# 设置工作目录
 WORKDIR /app
 
-# 复制依赖文件
-COPY requirements.txt .
+# Claude CLI 安装（容器内自带，用户无需预装）
+# 注意: claude 需要 Node.js 环境，基础镜像 python:3.10-slim-bookworm 已包含
+# 如果 claude 未安装，请确保在宿主机已通过 npm install -g @anthropic-ai/claude-code 安装
+RUN which claude || (echo "WARNING: claude CLI not found in image, will use host-installed binary")
 
-# 安装 Python 依赖
-RUN pip install --no-cache-dir -r requirements.txt
+# 依赖安装 — 使用轻量的 requirements-server.txt
+ARG PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+COPY requirements-server.txt .
+RUN pip install --no-cache-dir -i ${PIP_INDEX} --trusted-host pypi.tuna.tsinghua.edu.cn -r requirements-server.txt
 
-# 安装 Docker SDK（用于管理沙箱容器）
-RUN pip install --no-cache-dir docker
-
-# 复制应用代码
+# 应用代码
 COPY app/ ./app/
 COPY scripts/ ./scripts/
+COPY prompts/ ./prompts/
+COPY prompts_override/ ./prompts_override/
 
-# 创建必要的目录
+# 脚本全部可执行，并加入 PATH 方便 Agent 直接调用
+RUN chmod +x scripts/*.sh && chmod +x scripts/*.py
+ENV PATH="${PATH}:/app/scripts"
+
+# 目录（运行时由 docker-compose 的 ro 挂载提供）
 RUN mkdir -p \
     /app/data/raw \
-    /app/data/work \
-    /app/data/canonical_md \
-    /app/data/chunks \
-    /app/data/embeddings
+    /app/data/canonical_md
 
-# 暴露端口
 EXPOSE 8000
 
-# 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:8000/ || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
-# 启动命令
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

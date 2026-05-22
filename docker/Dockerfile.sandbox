@@ -1,56 +1,61 @@
-# Biblebot Sandbox - 安全的执行环境
-# 为 AI Agent 提供隔离的 Bash 和 Python 执行环境
+# Biblebot Sandbox - Claude CLI Agent 探索环境
+# 为 Claude CLI 提供隔离的 Bash 和 Python 执行环境
 
 FROM python:3.10-slim-bookworm
 
 LABEL maintainer="Biblebot Team"
-LABEL description="Secure sandbox environment for Biblebot AI Agent tool execution"
+LABEL description="Exploration sandbox for Claude CLI Agent — Bash + Python + rich toolset"
 
-# 设置环境变量
+# 环境变量
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV WORKSPACE=/workspace
 
-# 安装系统工具
-# 分为基础工具、开发工具、文本处理工具、网络工具
+# 系统工具 — 供 Claude CLI Agent 探索知识库使用
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # 基础工具
     bash \
     coreutils \
     curl \
     wget \
     ca-certificates \
-    \
-    # 开发工具
     git \
+    build-essential \
+    gcc \
+    g++ \
+    make \
+    cmake \
     vim \
     nano \
     less \
-    \
-    # 文本处理工具
     grep \
     ripgrep \
     fd-find \
     tree \
     jq \
-    \
-    # 文件处理
+    yq \
+    bat \
+    fzf \
+    silversearcher-ag \
     file \
     unzip \
-    \
-    # 网络工具（可选，可用于调试）
+    p7zip-full \
+    pandoc \
+    poppler-utils \
     net-tools \
     iputils-ping \
-    \
-    # 清理
+    dnsutils \
+    sqlite3 \
+    bc \
+    htop \
+    neofetch \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# 创建 fd 的软链接（fd-find 包名不同）
+# fd 软链接
 RUN ln -s $(which fdfind) /usr/local/bin/fd 2>/dev/null || true
 
-# 安装常用的 Python 包
+# Python 包 — 供 Claude CLI Agent 数据分析使用
 RUN pip install --no-cache-dir \
     numpy \
     pandas \
@@ -59,30 +64,35 @@ RUN pip install --no-cache-dir \
     beautifulsoup4 \
     lxml \
     pyyaml \
-    python-dateutil
+    python-dateutil \
+    scipy \
+    scikit-learn \
+    openpyxl \
+    pillow \
+    rich \
+    tqdm \
+    httpx \
+    aiohttp
 
-# 创建工作目录结构
-# /workspace/data/raw - 只读映射的知识库
-# /workspace/work - 可写的工作目录
-# /workspace/temp - 临时文件目录
+# 工作目录
+# /workspace/data/canonical_md - 知识库（只读映射）
+# /workspace/work - 工作目录（可读写）
+# /workspace/temp - 临时目录
 RUN mkdir -p \
-    ${WORKSPACE}/data/raw \
+    ${WORKSPACE}/data/canonical_md \
     ${WORKSPACE}/work \
     ${WORKSPACE}/temp \
-    && chmod 755 ${WORKSPACE}/data/raw \
+    && chmod 755 ${WORKSPACE}/data/canonical_md \
     && chmod 777 ${WORKSPACE}/work \
     && chmod 777 ${WORKSPACE}/temp
 
-# 设置工作目录
 WORKDIR ${WORKSPACE}
 
-# 创建非 root 用户（额外的安全层）
+# 非 root 用户
 RUN groupadd -r agent && useradd -r -g agent -d ${WORKSPACE} -s /bin/bash agent \
     && chown -R agent:agent ${WORKSPACE}/work ${WORKSPACE}/temp
 
-# 健康检查
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "print('healthy')" || exit 1
 
-# 默认保持运行
 CMD ["tail", "-f", "/dev/null"]

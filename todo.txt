@@ -1,0 +1,89 @@
+# Biblebot 开发路线
+# 目标：Open WebUI → OpenAI兼容API → Claude CLI Agent → SSE流式输出
+
+## 架构决策
+
+- 会话识别：取 messages[0].content 的 hash 作为 session_key（不改OpenWebUI源码）
+- 新会话：claude --session-id <key> --system-prompt "..." -p --output-format stream-json
+- 续接：claude --resume <key> -p --output-format stream-json
+- 编辑/回滚：claude --fork-session
+- 记忆管理：全由Claude session托管，不自己写
+- 多线程：一个Claude进程=一个对话，用SessionPool管理子进程池
+- 用户自定义：prompts通过prompts_override/patches.yaml注入
+- 沙箱安全：Claude的bash/python跑在Docker只读挂载的知识库中
+- 自定义CLI：用户脚本挂载点（后续）
+
+## 实现任务
+
+### Phase 1: 核心链路 [P0] ✅ DONE
+1. [x] 新建 app/agent/claude_session.py - ClaudeSession类
+   - 管理一个claude子进程(stdin/stdout stream-json)
+   - 暴露 send_message(msg) -> AsyncIterator[str] 流式输出
+   - 支持 fork/resume/kill
+
+2. [x] 新建 app/agent/session_pool.py - SessionPool类
+   - {session_key -> ClaudeSession} 映射
+   - get_or_create(key, system_prompt) 工厂方法
+   - 空闲超时清理 + 最大进程数限制
+
+3. [x] 新建 app/agent/prompt_builder.py - Prompt构建器
+   - 读取 prompts/*.txt 拼成基础 SYSTEM_PROMPT
+   - 合并 prompts_override/patches.yaml 的 YAML patch
+   - 注入 RAG 工具说明（scripts/rag_search.py）
+
+4. [x] 修改 app/api/routes.py - 新增 /v1/chat/completions 端点
+   - 解析 messages 数组
+   - 提取 session_key = hash(messages[0].content)
+   - 可通过 x-session-id header 覆盖
+   - 新会话：get_or_create(key, system_prompt)
+   - 已有会话：取最后一条user消息 → session.send_message(msg)
+   - 流式响应：SSE (text/event-stream)
+   - 也支持非流式（一次性返回json）
+
+5. [x] 新增 /v1/models 端点 - 返回模型列表 ["biblebot"]
+
+### Phase 2: 测试验证 [P0] ✅ DONE
+6. [x] 用 curl 模拟 Open WebUI 请求验证全链路
+   - 单轮问答 ✅
+   - 多轮对话（验证session记忆）✅
+   - 流式SSE输出验证 ✅
+   - 并行两个对话 (待测)
+
+### Phase 3: Docker集成 [P1]
+7. [ ] 更新 docker/Dockerfile.server - 确保沙箱工具可用
+8. [ ] 更新 docker/docker-compose.yml - 加上claude依赖说明
+
+### Phase 4: 进阶功能 [P1-P2]
+9.  [x] MCP工具接入 — Claude CLI 原生支持 --mcp-config，用户通过 mcp_config.json 自行配置
+10. [ ] 用户自定义CLI脚本挂载点
+11. [ ] 编辑/回滚场景 - fork-session支持
+12. [ ] 会话列表API - /v1/conversations (可选)
+
+## 不做的
+
+- 不自己写记忆管理
+- 不改Open WebUI源码
+- 不用Redis/数据库存会话（Claude session文件天然持久化）
+- 不引入新前端（保持Open WebUI）
+
+## 测试命令
+
+```bash
+# 启动服务
+docker compose -f docker/docker-compose.yml up -d
+
+# 测试单轮
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"biblebot","messages":[{"role":"user","content":"140服务器怎么使用"}]}'
+
+# 测试多轮(同样session_key=同一条首消息)
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"biblebot","messages":[{"role":"user","content":"140服务器怎么使用"},{"role":"assistant","content":"..."},{"role":"user","content":"那编译呢"}]}'
+
+# Open WebUI配置
+API地址: http://localhost:8000/v1
+API Key: 随意填(不校验)
+模型名: biblebot
+```

@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "phabricator": {
+      "description": "Phabricator（查任务/代码审查/仓库查询）",
+      "command": "node",
+      "args": [
+        "/path/to/phabricator-mcp/dist/index-readonly.js"
+      ],
+      "env": {
+        "PHABRICATOR_URL": "http://your-phabricator-host:8080/",
+        "PHABRICATOR_API_TOKEN": "api-your-token-here"
+      }
+    }
+  }
+}

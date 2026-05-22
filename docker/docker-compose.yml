@@ -1,12 +1,76 @@
+# Biblebot - Agent API 服务
+# Qdrant 向量数据库 + Biblebot API 服务（OpenAI 兼容 + RAG）
+# Agent Runtime: Claude CLI（通过 ANTHROPIC_API_KEY 认证）
+
 version: '3.8'
 
 services:
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: qdrant_biblebot
+    container_name: biblebot-qdrant
     ports:
       - "6333:6333"
       - "6334:6334"
     volumes:
-      - ./qdrant_storage:/qdrant/storage
-    restart: always
+      - qdrant-storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/localhost/6333; printf 'GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; grep -qi ok <&3"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - biblebot-net
+
+  biblebot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+      args:
+        - HTTP_PROXY=${HTTP_PROXY:-}
+        - HTTPS_PROXY=${HTTPS_PROXY:-}
+        - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,qdrant}
+    container_name: biblebot-server
+    ports:
+      - "8000:8000"
+    volumes:
+      # 整个工程目录只读（app 代码、scripts、prompts 等全部不可修改）
+      - ../:/app:ro
+      # Agent 临时工作目录（tmpfs 内存盘，覆盖只读的 /app/data/work）
+      - type: tmpfs
+        target: /app/data/work
+        tmpfs:
+          size: 256M
+      # 配置文件
+      - ../.env:/app/.env:ro
+      # Claude session 持久化（对话历史保存在宿主机）
+      - claude-sessions:/root/.claude
+    env_file:
+      - ../.env
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    dns:
+      - 114.114.114.114
+      - 8.8.8.8
+    restart: unless-stopped
+    networks:
+      - biblebot-net
+
+volumes:
+  qdrant-storage:
+    driver: local
+  claude-sessions:
+    driver: local
+
+networks:
+  biblebot-net:
+    external: true
+    name: docker_default

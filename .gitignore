@@ -1,5 +1,6 @@
 # Python
 venv/
+.venv/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -24,6 +25,7 @@ wheels/
 # 环境配置（包含敏感信息）
 .env
 RAG_env.txt
+mcp_config.json
 
 # IDE
 .idea/
@@ -37,7 +39,10 @@ RAG_env.txt
 Thumbs.db
 
 # 数据目录（生成的中间文件和向量数据）
-data
+data/**
+# 但保留目录结构和 .gitkeep 确保 clone 后空目录存在
+!data/**/
+!data/**/.gitkeep
 logs
 
 # Docker 数据卷
@@ -50,3 +55,5 @@ prompts_override/*
 
 # 日志
 *.log
+.env
+.tmp/

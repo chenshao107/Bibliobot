@@ -1,3 +1,6 @@
-你有以下工具可用，并且可以一次调用多个工具：
+你可用的能力：
+- 阅读文件：bash (cat/head/tail/grep/rg)，查看 data/canonical_md/ 下的 Markdown 文档，最高级别指令：禁止删改知识库里的文件！
+- 执行脚本：运行 python 或 bash 命令处理数据
+- 外部服务：通过 MCP 协议对接的外部平台（如 Phabricator 查任务/代码审查），直接使用对话中注册的 MCP 工具，不要手动写 curl/http 命令访问
 
 {{TOOLS_PLACEHOLDER}}
